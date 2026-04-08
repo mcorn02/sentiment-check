@@ -37,18 +37,18 @@ export function ReportPage() {
           </CardBody>
         </Card>
 
-        {/* Warning */}
+        {/* Warning — H1/H2: role="alert" + aria-live="assertive" ensures screen readers announce this immediately */}
         {sse.warning && (
-          <div className="flex items-center gap-2 p-4 bg-yellow-950 border border-yellow-800 rounded-lg text-yellow-300 text-sm">
-            <AlertTriangle className="w-5 h-5 shrink-0" />
+          <div role="alert" aria-live="assertive" className="flex items-center gap-2 p-4 bg-yellow-950 border border-yellow-800 rounded-lg text-yellow-300 text-sm">
+            <AlertTriangle className="w-5 h-5 shrink-0" aria-hidden="true" />
             {sse.warning}
           </div>
         )}
 
-        {/* Error */}
+        {/* Error — H1/H2: role="alert" + aria-live="assertive" ensures screen readers announce this immediately */}
         {sse.error && (
-          <div className="flex items-center gap-2 p-4 bg-red-950 border border-red-800 rounded-lg text-red-300 text-sm">
-            <XCircle className="w-5 h-5 shrink-0" />
+          <div role="alert" aria-live="assertive" className="flex items-center gap-2 p-4 bg-red-950 border border-red-800 rounded-lg text-red-300 text-sm">
+            <XCircle className="w-5 h-5 shrink-0" aria-hidden="true" />
             {sse.error}
           </div>
         )}
