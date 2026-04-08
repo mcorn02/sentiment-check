@@ -43,6 +43,8 @@ export function useSSE() {
     setIsRunning(false);
   }, []);
 
+  // H6: handleEvent is defined inside startReport so it always closes over
+  // fresh setState calls rather than capturing stale state at render time.
   const startReport = useCallback(async (imdbUrl: string, aspects?: string[]) => {
     // Abort any existing request
     if (abortRef.current) {
@@ -54,6 +56,72 @@ export function useSSE() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+
+    function handleEvent(event: string, data: Record<string, unknown>) {
+      switch (event) {
+        case 'stage': {
+          const stageData = data as unknown as StageEvent;
+          setState(prev => ({
+            ...prev,
+            stage: stageData.stage,
+            stageMessage: stageData.message || prev.stageMessage,
+            progress: stageData.progress ?? prev.progress,
+            total: stageData.total ?? prev.total,
+            movieTitle: stageData.movie_title || prev.movieTitle,
+          }));
+          break;
+        }
+        case 'aspect_complete': {
+          const aspect = data as unknown as AspectReport;
+          setState(prev => ({
+            ...prev,
+            completedAspects: [...prev.completedAspects, aspect],
+          }));
+          break;
+        }
+        case 'charts': {
+          const charts = data as { distributions: ChartDistribution[] };
+          setState(prev => ({
+            ...prev,
+            distributions: charts.distributions,
+          }));
+          break;
+        }
+        case 'report': {
+          const report = data as unknown as ReportData;
+          setState(prev => ({
+            ...prev,
+            report,
+          }));
+          break;
+        }
+        case 'warning': {
+          const warning = data as { message: string };
+          setState(prev => ({
+            ...prev,
+            warning: warning.message,
+          }));
+          break;
+        }
+        case 'error': {
+          const error = data as { message: string };
+          setState(prev => ({
+            ...prev,
+            stage: 'error',
+            error: error.message,
+          }));
+          break;
+        }
+        case 'done': {
+          const done = data as { status: string };
+          setState(prev => ({
+            ...prev,
+            stage: done.status === 'complete' ? 'done' : 'error',
+          }));
+          break;
+        }
+      }
+    }
 
     try {
       const body: Record<string, unknown> = { imdb_url: imdbUrl };
@@ -114,77 +182,15 @@ export function useSSE() {
     }
   }, []);
 
-  function handleEvent(event: string, data: Record<string, unknown>) {
-    switch (event) {
-      case 'stage': {
-        const stageData = data as unknown as StageEvent;
-        setState(prev => ({
-          ...prev,
-          stage: stageData.stage,
-          stageMessage: stageData.message || prev.stageMessage,
-          progress: stageData.progress ?? prev.progress,
-          total: stageData.total ?? prev.total,
-          movieTitle: stageData.movie_title || prev.movieTitle,
-        }));
-        break;
-      }
-      case 'aspect_complete': {
-        const aspect = data as unknown as AspectReport;
-        setState(prev => ({
-          ...prev,
-          completedAspects: [...prev.completedAspects, aspect],
-        }));
-        break;
-      }
-      case 'charts': {
-        const charts = data as { distributions: ChartDistribution[] };
-        setState(prev => ({
-          ...prev,
-          distributions: charts.distributions,
-        }));
-        break;
-      }
-      case 'report': {
-        const report = data as unknown as ReportData;
-        setState(prev => ({
-          ...prev,
-          report,
-        }));
-        break;
-      }
-      case 'warning': {
-        const warning = data as { message: string };
-        setState(prev => ({
-          ...prev,
-          warning: warning.message,
-        }));
-        break;
-      }
-      case 'error': {
-        const error = data as { message: string };
-        setState(prev => ({
-          ...prev,
-          stage: 'error',
-          error: error.message,
-        }));
-        break;
-      }
-      case 'done': {
-        const done = data as { status: string };
-        setState(prev => ({
-          ...prev,
-          stage: done.status === 'complete' ? 'done' : 'error',
-        }));
-        break;
-      }
-    }
-  }
-
+  // H7: cancel() resets all UI state so the user doesn't see stale mid-stream
+  // data after stopping. A brief "Analysis cancelled" message is shown then cleared.
   const cancel = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
     }
+    setState({ ...initialState, stageMessage: 'Analysis cancelled.' });
     setIsRunning(false);
+    setTimeout(() => setState(initialState), 2000);
   }, []);
 
   return { ...state, isRunning, startReport, cancel, reset };

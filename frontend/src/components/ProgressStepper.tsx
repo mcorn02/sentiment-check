@@ -74,9 +74,18 @@ export function ProgressStepper({ stage, stageMessage, progress, total }: Progre
 
       {stageMessage && (
         <div className="text-center">
-          <p className="text-sm text-gray-400">{stageMessage}</p>
+          {/* H1: aria-live="polite" announces stage changes to screen readers without interrupting */}
+          <p role="status" aria-live="polite" className="text-sm text-gray-400">{stageMessage}</p>
           {total > 0 && (
-            <div className="mt-2 w-full bg-gray-800 rounded-full h-2">
+            // H3: role="progressbar" with value attributes makes this readable by assistive technology
+            <div
+              role="progressbar"
+              aria-valuenow={Math.min(Math.round((progress / total) * 100), 100)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Analysis progress"
+              className="mt-2 w-full bg-gray-800 rounded-full h-2"
+            >
               <div
                 className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${Math.min((progress / total) * 100, 100)}%` }}

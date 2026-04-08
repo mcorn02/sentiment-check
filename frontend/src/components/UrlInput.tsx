@@ -60,7 +60,8 @@ export function UrlInput({ onSubmit, isLoading }: UrlInputProps) {
             className="w-full px-4 py-3 pr-12 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-100 placeholder-gray-500"
             disabled={isLoading}
           />
-          <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          {/* H5: aria-hidden hides decorative icon from screen readers */}
+          <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" aria-hidden="true" />
         </div>
         {url && !isValid && (
           <p className="mt-1 text-sm text-red-500">
@@ -80,11 +81,13 @@ export function UrlInput({ onSubmit, isLoading }: UrlInputProps) {
         </label>
         <div className="flex flex-wrap gap-2">
           {DEFAULT_ASPECTS.map(aspect => (
+            // H4: aria-pressed communicates toggle state to screen readers
             <button
               key={aspect}
               type="button"
               onClick={() => toggleAspect(aspect)}
               disabled={isLoading}
+              aria-pressed={selectedAspects.includes(aspect)}
               className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                 selectedAspects.includes(aspect)
                   ? 'bg-blue-900 text-blue-200 border border-blue-700'
@@ -95,11 +98,16 @@ export function UrlInput({ onSubmit, isLoading }: UrlInputProps) {
             </button>
           ))}
         </div>
+        {/* H4: visible hint when no aspects are selected so user knows why submit is disabled */}
+        {selectedAspects.length === 0 && (
+          <p id="aspects-hint" className="text-xs text-red-400 mt-1">Select at least one aspect to analyze.</p>
+        )}
       </div>
 
       <button
         type="submit"
         disabled={!isValid || selectedAspects.length === 0 || isLoading}
+        aria-describedby={selectedAspects.length === 0 ? 'aspects-hint' : undefined}
         className="w-full py-3 px-6 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-800 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
       >
         {isLoading ? (
