@@ -18,6 +18,7 @@ from api.routes.analyze import router as analyze_router
 from api.routes.batch import router as batch_router
 from api.routes.domains import router as domains_router
 from api.routes.report import router as report_router
+from api.routes.research import router as research_router
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -54,6 +55,7 @@ app.include_router(analyze_router, prefix="/api")
 app.include_router(batch_router, prefix="/api")
 app.include_router(domains_router, prefix="/api")
 app.include_router(report_router, prefix="/api")
+app.include_router(research_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["meta"])

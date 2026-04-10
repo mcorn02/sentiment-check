@@ -5,6 +5,7 @@ import type {
   ChartDistribution,
   ReportData,
   AspectReport,
+  Insight,
 } from '../types/report';
 
 interface SSEState {
@@ -16,6 +17,7 @@ interface SSEState {
   distributions: ChartDistribution[];
   report: ReportData | null;
   completedAspects: AspectReport[];
+  insights: Insight[];
   error: string | null;
   warning: string | null;
 }
@@ -29,6 +31,7 @@ const initialState: SSEState = {
   distributions: [],
   report: null,
   completedAspects: [],
+  insights: [],
   error: null,
   warning: null,
 };
@@ -114,6 +117,14 @@ export function useSSE() {
         setState(prev => ({
           ...prev,
           report,
+        }));
+        break;
+      }
+      case 'insights': {
+        const insightsData = data as { insights: Insight[] };
+        setState(prev => ({
+          ...prev,
+          insights: insightsData.insights ?? [],
         }));
         break;
       }
@@ -220,10 +231,48 @@ export function useSSE() {
     }
   }, []);
 
+  const startURLReport = useCallback(async (url: string, domainId: string, aspects: string[]) => {
+    if (abortRef.current) abortRef.current.abort();
+    setState(initialState);
+    setIsRunning(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const body: Record<string, unknown> = { url };
+      if (domainId) body.domain_id = domainId;
+      if (aspects.length > 0) body.aspects = aspects;
+
+      const response = await fetch('/api/report/url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        throw new Error(errData?.detail || `HTTP ${response.status}`);
+      }
+
+      await consumeSSE(response);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setState(prev => ({
+        ...prev,
+        stage: 'error',
+        error: err instanceof Error ? err.message : 'Unknown error',
+      }));
+    } finally {
+      setIsRunning(false);
+    }
+  }, []);
+
   const cancel = useCallback(() => {
     if (abortRef.current) abortRef.current.abort();
     setIsRunning(false);
   }, []);
 
-  return { ...state, isRunning, startCSVReport, startIMDBReport, cancel, reset };
+  return { ...state, isRunning, startCSVReport, startIMDBReport, startURLReport, cancel, reset };
 }

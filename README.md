@@ -1,6 +1,6 @@
 # Sentiment Check
 
-An aspect-based sentiment analysis tool that supports IMDB movie review scraping and CSV upload for any industry. Generates structured sentiment reports broken down by aspect, powered by GPT-4o-mini via the OpenAI API.
+An aspect-based sentiment analysis tool that supports IMDB movie review scraping, Google Maps and Yelp review scraping, and CSV upload for any industry. Generates structured sentiment reports broken down by aspect, powered by GPT-4o-mini via the OpenAI API.
 
 ## Installation
 
@@ -15,7 +15,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Install Playwright's Chromium browser (used for scraping IMDB reviews):
+3. Install Playwright's Chromium browser (used for scraping IMDB, Google Maps, and Yelp reviews):
 ```bash
 playwright install chromium
 ```
@@ -72,6 +72,37 @@ Stages: `scraping` → `analyzing` → `generating` → `done`
 ```
 
 The `aspects` field is optional; omitting it uses the default aspects defined in `app/config.py`.
+
+### Competitive Research API
+
+`POST /api/research/competitors` runs a competitive analysis of sentiment analysis tools and platforms and returns a structured report. This is an internal/admin endpoint.
+
+**Request body (optional):**
+```json
+{
+  "focus": "pricing"
+}
+```
+
+The `focus` field is optional. When provided, the analysis emphasizes that area (e.g. `"pricing"`, `"features"`, `"target market"`). Omitting the body or the field runs a general analysis.
+
+**Response structure:**
+```json
+{
+  "competitors": [
+    {
+      "name": "...",
+      "pricing": "...",
+      "key_features": ["..."],
+      "strengths": ["..."],
+      "weaknesses": ["..."],
+      "target_market": "..."
+    }
+  ],
+  "gaps": ["..."],
+  "opportunities": ["..."]
+}
+```
 
 ### CSV Upload
 
@@ -143,3 +174,5 @@ python evaluation/final_sentiment_analysis.py
 **NLTK data missing:** Run `python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"` manually.
 
 **IMDB scraper blocked or returning no results:** The scraper uses Playwright with headless Chromium to bypass bot detection. If reviews fail to load, ensure Playwright's Chromium browser is installed (`playwright install chromium`) and try again.
+
+**Google Maps or Yelp scraper blocked or returning no results:** Both scrapers use Playwright with headless Chromium. If reviews fail to load, ensure Playwright's Chromium browser is installed (`playwright install chromium`) and try again. For Google Maps, both full `google.com/maps/` URLs and short `maps.app.goo.gl` links are supported.

@@ -178,8 +178,6 @@ def main() -> None
 
 ## 3. What Changed
 
-This section documents the change introduced in the current diff relative to the previous version of the file.
-
 ### 3.1 Removed: `"Zero-shot NLI (local)"` Analysis Method
 
 **Before**:
@@ -206,31 +204,32 @@ parser.add_argument(
 
 #### What Was Removed
 
-The `"Zero-shot NLI (local)"` option has been removed from the `--method` argument's `choices` list. This was one of two supported analysis backends; it presumably ran a local Natural Language Inference model (e.g., a Hugging Face zero-shot classification pipeline) without requiring any external API credentials or network access.
+The `"Zero-shot NLI (local)"` option has been removed from the `--method` argument's `choices` list. This was one of two previously supported analysis backends. It presumably executed a local Natural Language Inference model — most likely a Hugging Face zero-shot classification pipeline — entirely on the host machine, without requiring external API credentials or any network access at inference time.
 
 #### Why It Matters Functionally
 
-This is a **breaking change** for any user or script that previously invoked the application with `--method "Zero-shot NLI (local)"`. `argparse` enforces the `choices` constraint at parse time, so passing this value will now result in an immediate error:
+This is a **breaking change** for any user or automated script that previously invoked the application with `--method "Zero-shot NLI (local)"`. Because `argparse` enforces the `choices` constraint at parse time, passing this value now results in an immediate, non-recoverable parse error before any application logic runs:
 
 ```
 error: argument --method: invalid choice: 'Zero-shot NLI (local)'
       (choose from 'LLM (OpenAI)')
 ```
 
-The application now has **only one supported analysis method**: `"LLM (OpenAI)"`. Since the default is also `"LLM (OpenAI)"`, users who did not explicitly pass `--method` are unaffected. However, users who:
-- Relied on offline/local analysis without an OpenAI API key, or
-- Scripted the `--method "Zero-shot NLI (local)"` flag explicitly,
+The application now has **exactly one supported analysis method**: `"LLM (OpenAI)"`. Since that value is also the default, users who omit the `--method` flag entirely are unaffected. However, the following user groups are directly impacted:
 
-will need to update their workflows. The local inference path is no longer accessible through the CLI regardless of whether the underlying `sentiment_analyzer` module still supports it internally.
+- **Offline users**: Anyone who relied on local, credential-free inference to avoid requiring an OpenAI API key can no longer do so through the CLI, regardless of whether the underlying `app/sentiment_analyzer.py` module still implements the NLI code path internally.
+- **Scripted / automated pipelines**: Any shell script, CI job, or configuration that explicitly passes `--method "Zero-shot NLI (local)"` will now fail immediately at startup.
+- **Cost-conscious users**: The local NLI method incurred no per-request API cost. Removal of this option means all CLI-driven analysis now routes through the OpenAI API, which has associated usage costs.
 
 #### Behavioral Differences
 
 | Scenario | Before | After |
 |----------|--------|-------|
-| `--method "LLM (OpenAI)"` | Works | Works (unchanged) |
-| `--method "Zero-shot NLI (local)"` | Works, uses local NLI model | **Fails with argparse error** |
-| No `--method` flag | Defaults to `"LLM (OpenAI)"` | Defaults to `"LLM (OpenAI)"` (unchanged) |
-| Offline usage without OpenAI key | Possible via NLI method | **No longer possible via CLI** |
+| `--method "LLM (OpenAI)"` | ✅ Works normally | ✅ Works normally (unchanged) |
+| `--method "Zero-shot NLI (local)"` | ✅ Works, routes to local NLI model | ❌ **Fails immediately with argparse error** |
+| No `--method` flag supplied | Defaults to `"LLM (OpenAI)"` | Defaults to `"LLM (OpenAI)"` (unchanged) |
+| Offline usage without OpenAI key | ✅ Possible via NLI method | ❌ **No longer possible via CLI** |
+| API cost incurred per analysis | Optional (avoidable via NLI) | Always incurred for any CLI analysis |
 
 ---
 
@@ -241,38 +240,38 @@ will need to update their workflows. The local inference path is no longer acces
 | Module | Usage |
 |--------|-------|
 | `argparse` | Full CLI argument definition, parsing, and help generation |
-| `os` | File existence checks (`os.path.exists`), directory tree traversal (`os.walk`), path joining |
+| `os` | File existence checks (`os.path.exists`), directory traversal (`os.walk`), path joining (`os.path.join`) |
 | `sys` | `sys.exit(1)` on unrecoverable errors |
 
 ### 4.2 Third-Party (Required)
 
 | Package | Usage |
 |---------|-------|
-| `pandas` | Loading CSV files into DataFrames, extracting review columns, displaying results via `.to_string()` |
+| `pandas` | Loading CSV files into DataFrames, extracting review columns, displaying tabular results via `.to_string()` |
 
 ### 4.3 Third-Party (Optional / Lazy)
 
 | Package | Import Condition | Usage |
 |---------|-----------------|-------|
-| `kagglehub` | Module-level `try/except`; set to `None` if absent | Kaggle dataset download in `load_dataset_kaggle` |
+| `kagglehub` | Module-level `try/except ImportError`; set to `None` if absent | Kaggle dataset download in `load_dataset_kaggle` |
 | `uvicorn` | Imported inside `main()` only when `--web` is passed | ASGI server that hosts the FastAPI application |
 
 ### 4.4 Internal Imports
 
 | Module | Symbols Imported | Role in This File |
 |--------|-----------------|-------------------|
-| `app.config` | `DEFAULT_ASPECTS` | Provides the default aspect list for `--aspects` argument |
-| `app.sentiment_analyzer` | `analyze` | Core sentiment analysis logic called by `analyze_review_cli` |
-| `app.report_generator` | `generate_report`, `format_report_markdown` | Report generation utilities; imported but not directly invoked in the current CLI/batch paths — available for future use or consumed via the web API path |
+| `app.config` | `DEFAULT_ASPECTS` | Provides the default aspect list for the `--aspects` argument default value |
+| `app.sentiment_analyzer` | `analyze` | Core sentiment analysis logic called by `analyze_review_cli` for every review |
+| `app.report_generator` | `generate_report`, `format_report_markdown` | Report generation utilities; imported at module level but not directly invoked in current CLI or batch paths — available for future use or consumed indirectly via the web API path |
 
 ### 4.5 What Depends on This Module
 
 | Consumer | How It Uses `main.py` |
 |----------|-----------------------|
-| `if __name__ == "__main__"` block | Direct script execution via `python app/main.py` |
-| Package `__main__.py` (if present) | Enables `python -m app` invocation |
-| Shell scripts / CI pipelines | Invoked as `python -m app.main [args]` |
-| `api/main.py` | Referenced indirectly — `main.py` launches it via Uvicorn but does not import from it; the dependency is one-directional |
+| `if __name__ == "__main__"` guard | Enables direct script execution: `python app/main.py [args]` |
+| Package `__main__.py` (if present) | Enables module invocation: `python -m app [args]` |
+| Shell scripts / CI pipelines | Invoked as `python -m app.main [args]` for batch testing or automated analysis |
+| `api/main.py` | Referenced indirectly — `main.py` launches it via Uvicorn but does not import from it; the dependency is strictly one-directional (main → api) |
 
 ---
 

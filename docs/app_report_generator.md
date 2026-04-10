@@ -4,7 +4,7 @@
 
 ## 1. Module Overview
 
-`report_generator.py` implements a **Retrieval-Augmented Generation (RAG) pipeline** for producing structured, narrative reports from a corpus of textual reviews. It is the highest-level orchestration module in the application, sitting above the preprocessing, sentiment analysis, and configuration layers.
+`report_generator.py` implements a **Retrieval-Augmented Generation (RAG) pipeline** for producing structured, narrative reports from a corpus of textual reviews. It is the highest-level orchestration module in the application, sitting above the preprocessing, sentiment analysis, insights generation, and configuration layers.
 
 ### Responsibilities
 
@@ -14,7 +14,8 @@
 | **Two-stage semantic retrieval** | For each aspect, retrieves candidate sentences via bi-encoder cosine similarity, then re-ranks with a cross-encoder for higher precision |
 | **Sentiment aggregation** | Collects per-aspect sentiment labels across all reviews and computes distribution statistics |
 | **LLM narrative generation** | Calls an OpenAI chat model to write grounded, evidence-backed narrative sections per aspect |
-| **Report assembly** | Combines per-aspect results and an overall summary into a structured report dictionary |
+| **Insights generation** | Invokes the insights agent to produce actionable recommendations derived from the completed report |
+| **Report assembly** | Combines per-aspect results, an overall summary, and insights into a structured report dictionary |
 | **Markdown formatting** | Serializes the report dictionary into a human-readable Markdown document |
 
 ### Position in the System
@@ -29,7 +30,10 @@
   sentiment_analyzer.py     ← analyze / async_analyze_batch, embeddings, OpenAI clients
         │
         ▼
-  report_generator.py       ← RAG pipeline, LLM narration, report assembly  ◄── THIS MODULE
+  insights_agent.py         ← async_generate_insights
+        │
+        ▼
+  report_generator.py       ← RAG pipeline, LLM narration, insights, report assembly  ◄── THIS MODULE
         │
         ▼
   [Output: report dict / Markdown string]
@@ -188,7 +192,7 @@ The **public retrieval interface**. Orchestrates the full two-stage retrieval pi
 | `aspect` | `str` | The aspect label to retrieve sentences for |
 | `corpus` | `dict` | A corpus dict as returned by `build_corpus` |
 | `k` | `int` | Final number of results to return after re-ranking (default: `10`) |
-| `k_retrieve` | `int` | Number of bi-encoder candidates to fetch before re-ranking (default: `30`; must be `≥ k`) |
+| `k_retrieve` | `int` | Number of bi-encoder candidates to fetch before re-ranking (default: `30`; should be `≥ k`) |
 
 **Returns:**  
 `list[dict]` — top-`k` sentence dicts sorted by descending cross-encoder relevance score. Each dict contains `sentence` (`str`), `review_idx` (`int`), and `score` (`float`, cross-encoder score).
@@ -242,7 +246,7 @@ def generate_aspect_section(
 **Description:**  
 Synchronously calls the OpenAI Chat Completions API to produce a 2–4 sentence narrative paragraph about a single aspect. The prompt is grounded with the retrieved sentence evidence (including 1-indexed review numbers and relevance scores) and the computed sentiment distribution statistics. The model is explicitly instructed not to fabricate details beyond the provided quotes and to begin directly with findings.
 
-**Prompt structure (embedded in implementation):**
+**Prompt structure:**
 - Declares the aspect under discussion.
 - Presents the positive / negative / not-mentioned percentage breakdown.
 - Lists all retrieved sentences with `(review #N, relevance X.XX)` attribution.
@@ -262,7 +266,7 @@ Synchronously calls the OpenAI Chat Completions API to produce a 2–4 sentence 
 **Side Effects / Dependencies:**
 - Calls `_get_openai_client()` — synchronous OpenAI client singleton from `sentiment_analyzer.py`.
 - Makes a **blocking** HTTP request to the OpenAI API; latency is network-dependent.
-- Uses `OPENAI_MODEL` and `OPENAI_MAX_TOKENS` from config; temperature is fixed at `0.3` (low randomness for factual consistency).
+- Uses `OPENAI_MODEL` and `OPENAI_MAX_TOKENS` from config; temperature is fixed at `0.3`.
 
 ---
 
@@ -285,6 +289,8 @@ The synchronous, end-to-end report generation entry point. Executes a four-step 
 3. **Per-aspect processing** — for each aspect: collects sentiment labels across all reviews, computes distribution statistics, retrieves the top-10 most relevant sentences via the two-stage pipeline, and generates an LLM narrative section.
 4. **Overall summary** — constructs a cross-aspect sentiment breakdown and calls OpenAI to produce a 2–3 sentence executive summary.
 
+> **Note:** The synchronous path does **not** include an insights generation step. Insights are only produced by the async path (`async_generate_report`). The returned dict therefore does not include an `"insights"` key when using this function.
+
 **Parameters:**
 
 | Parameter | Type | Description |
@@ -292,43 +298,42 @@ The synchronous, end-to-end report generation entry point. Executes a four-step 
 | `reviews` | `list[str]` | Raw review texts to analyze |
 | `aspects` | `list[str] \| None` | Aspects to analyze; defaults to `DEFAULT_ASPECTS` from config if `None` or empty |
 | `method` | `str` | Sentiment analysis method passed through to `analyze()` (default: `"LLM (OpenAI)"`) |
-| `domain` | `str` | Domain label for LLM context passed through to `analyze()` (e.g., `"restaurant"`, `"software"`); default: `"product"` |
+| `domain` | `str` | Domain label for LLM context (e.g., `"restaurant"`, `"software"`); default: `"product"` |
 
 **Returns:**  
 `dict` with the following structure:
 
 ```python
 {
-    "n_reviews": int,                    # number of input reviews
+    "n_reviews": int,
     "aspects": [
         {
-            "name": str,                 # aspect label
+            "name": str,
             "distribution": {
                 "positive":      {"count": int, "pct": float},
                 "negative":      {"count": int, "pct": float},
                 "not_mentioned": {"count": int, "pct": float},
             },
-            "narrative": str,            # LLM-generated 2-4 sentence paragraph
+            "narrative": str,         # LLM-generated 2-4 sentence paragraph
             "top_quotes": [
                 {
                     "sentence": str,
-                    "review": int,       # 1-indexed review number
+                    "review": int,    # 1-indexed review number
                 },
-                # up to 5 entries (top 5 of the retrieved 10)
+                # up to 5 entries
             ],
         },
         # one dict per aspect
     ],
-    "overall_summary": str,             # LLM-generated 2-3 sentence cross-aspect summary
+    "overall_summary": str,           # LLM-generated 2-3 sentence cross-aspect summary
+    # NOTE: no "insights" key — use async_generate_report for insights
 }
 ```
 
 **Side Effects / Dependencies:**
-- Makes `len(reviews) + len(aspects) + 1` OpenAI API calls in total, all blocking and serial. For large corpora or many aspects this can be slow.
+- Makes `len(reviews) + len(aspects) + 1` OpenAI API calls in total, all blocking and serial. For large corpora or many aspects, this can be slow.
 - Encodes the full corpus once; encoding time scales linearly with total sentence count.
 - Triggers lazy loading of both the sentence-transformer model and the cross-encoder model.
-- `method` controls the sentiment analysis backend (e.g., local model vs. LLM).
-- `domain` provides LLM context for more accurate aspect-level sentiment classification.
 
 ---
 
@@ -343,4 +348,4 @@ async def async_generate_aspect_section(
 ```
 
 **Description:**  
-Async counterpart to `generate_aspect_section`. Functionally identical in terms of prompt construction, model parameters, and output format — but uses the async OpenAI client obtained from `_get_async_openai_client
+Async counterpart

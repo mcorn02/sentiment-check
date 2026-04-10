@@ -110,6 +110,18 @@ class IMDBReportRequest(BaseModel):
     )
 
 
+# ── URL Report (Google, Yelp, IMDB) ────────────────────────────────────────
+
+class URLReportRequest(BaseModel):
+    url: str = Field(..., description="Review page URL (IMDB, Google Maps, or Yelp)")
+    domain_id: str | None = Field(None, description="Saved domain config ID")
+    domain: str = Field("product", description="Domain label if not using a saved config")
+    aspects: list[str] | None = Field(
+        None, description="Aspects to analyze (defaults to domain config)"
+    )
+    max_reviews: int = Field(75, description="Maximum reviews to scrape", ge=5, le=200)
+
+
 # ── Report Chat ──────────────────────────────────────────────────────────────
 
 class ChatRequest(BaseModel):

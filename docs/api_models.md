@@ -51,7 +51,7 @@ class AnalysisMethod(str, Enum):
 |--------|-------|-------------|
 | `llm` | `"LLM (OpenAI)"` | Uses the OpenAI API (remote, requires API key) |
 
-> **Note:** This enum previously contained a second member (`nli = "Zero-shot NLI (local)"`) which has been removed. Only the `llm` backend is now supported. See [What Changed](#3-what-changed) for details.
+> **Note:** Only the `llm` backend is supported. Any request payload containing an unrecognized `method` value will fail Pydantic validation.
 
 ---
 
@@ -146,8 +146,6 @@ class AnalyzeRequest(BaseModel):
 | `method` | `AnalysisMethod` | ❌ No | `AnalysisMethod.llm` | Which analysis backend to invoke |
 
 **Resolution priority (server-side):** `domain_id` (loads saved config) → `aspects` override (overrides config aspects if present) → `domain` fallback label (used when no `domain_id` is given).
-
-> **Behavioral note:** Because `AnalysisMethod.nli` has been removed, any previously submitted request payload containing `"method": "Zero-shot NLI (local)"` will now **fail Pydantic validation**. The only accepted value for `method` is `"LLM (OpenAI)"` (or equivalently, the enum default `AnalysisMethod.llm`).
 
 ---
 
@@ -358,8 +356,16 @@ class IMDBReportRequest(BaseModel):
 
 ---
 
-### Report Chat Models
+### URL Report Models
 
 ---
 
-#### `ChatRequest`
+#### `URLReportRequest`
+
+```python
+class URLReportRequest(BaseModel):
+    url: str = Field(..., description="Review page URL (IMDB, Google Maps, or Yelp)")
+    domain_id: str | None = Field(None, description="Saved domain config ID")
+    domain: str = Field("product", description="Domain label if not using a saved config")
+    aspects: list[str] | None = Field(
+        None, description="Aspects to analyze (defaults to domain config)"

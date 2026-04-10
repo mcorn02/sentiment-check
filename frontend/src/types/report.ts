@@ -26,6 +26,13 @@ export interface ChartDistribution {
   not_mentioned_pct: number;
 }
 
+export interface Insight {
+  type: 'risk' | 'strength' | 'trend' | 'opportunity';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+}
+
 export interface ReportData {
   report_id: string;
   overall_summary: string;

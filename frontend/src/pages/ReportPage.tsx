@@ -2,9 +2,10 @@ import { useSSE } from '../hooks/useSSE';
 import { ReviewInput } from '../components/ReviewInput';
 import { ProgressStepper } from '../components/ProgressStepper';
 import { SentimentBarChart } from '../components/charts/SentimentBarChart';
-import { SentimentPieChart } from '../components/charts/SentimentPieChart';
+import { AspectSentimentGrid } from '../components/charts/AspectSentimentGrid';
 import { AspectRadarChart } from '../components/charts/AspectRadarChart';
 import { ReportCard } from '../components/report/ReportCard';
+import { InsightsPanel } from '../components/report/InsightsPanel';
 import { AspectSection } from '../components/report/AspectSection';
 import { ReportChat } from '../components/ReportChat';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
@@ -34,7 +35,7 @@ export function ReportPage() {
         {/* Input Form */}
         <Card>
           <CardBody>
-            <ReviewInput onSubmitCSV={sse.startCSVReport} isLoading={sse.isRunning} />
+            <ReviewInput onSubmitCSV={sse.startCSVReport} onSubmitURL={sse.startURLReport} isLoading={sse.isRunning} />
           </CardBody>
         </Card>
 
@@ -77,6 +78,11 @@ export function ReportPage() {
           />
         )}
 
+        {/* Insights */}
+        {sse.insights.length > 0 && (
+          <InsightsPanel insights={sse.insights} />
+        )}
+
         {/* Charts */}
         {showCharts && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -95,12 +101,12 @@ export function ReportPage() {
             <Card>
               <CardHeader>
                 <h2 className="text-lg font-semibold text-white">
-                  Overall Sentiment
+                  Aspect Sentiment Breakdown
                 </h2>
-                <p className="text-sm text-gray-400">Aggregate positive vs. negative across all aspects</p>
+                <p className="text-sm text-gray-400">Per-aspect positive vs. negative ratio</p>
               </CardHeader>
               <CardBody>
-                <SentimentPieChart distributions={sse.distributions} />
+                <AspectSentimentGrid distributions={sse.distributions} />
               </CardBody>
             </Card>
 

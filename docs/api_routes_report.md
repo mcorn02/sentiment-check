@@ -4,12 +4,12 @@
 
 ### Purpose
 
-`api/routes/report.py` implements three SSE (Server-Sent Events) streaming HTTP endpoints that form the primary entry point for the review analysis pipeline. Clients submit either an IMDB movie URL or a CSV file of reviews, receive real-time pipeline progress events via a persistent HTTP stream, and may subsequently ask natural-language questions about the generated report through a conversational Q&A endpoint.
+`api/routes/report.py` implements four SSE (Server-Sent Events) streaming HTTP endpoints and one JSON endpoint that together form the primary entry point for the review analysis pipeline. Clients submit an IMDB movie URL, a generic review page URL (Google Maps, Yelp, or IMDB), or a CSV file of reviews, receive real-time pipeline progress events via a persistent HTTP stream, and may subsequently ask natural-language questions about the generated report through a conversational Q&A endpoint.
 
 ### Responsibilities
 
-- **Input validation**: Validates IMDB URLs against a module-level compiled regex; validates CSV uploads for parsability, non-emptiness, and the presence of a detectable review column; validates chat requests against a cached `report_id`.
-- **Pipeline orchestration**: Coordinates sequential pipeline stages — scraping (IMDB flow) or parsing (CSV flow), sentiment analysis, and report generation — delegating all actual work to service-layer modules.
+- **Input validation**: Validates IMDB URLs against a module-level compiled regex; validates generic URLs by delegating source detection to `detect_source`; validates CSV uploads for parsability, non-emptiness, and the presence of a detectable review column; validates chat requests against a cached `report_id`.
+- **Pipeline orchestration**: Coordinates sequential pipeline stages — scraping (IMDB and URL flows) or parsing (CSV flow), sentiment analysis, and report generation — delegating all actual work to service-layer modules.
 - **Real-time progress streaming**: Uses an `asyncio.Queue` as an internal message bus to bridge the async report pipeline with the SSE response stream, allowing nested async callbacks to enqueue events for the outer generator to yield without violating Python's generator semantics.
 - **SSE event formatting**: Serializes all structured data as correctly delimited SSE frames and assigns semantic event type names so clients can route each message to the appropriate UI handler.
 - **Report caching**: Stores generated reports and their associated review corpora in a module-level in-memory dictionary keyed by UUID, enabling subsequent chat queries to operate over the same data without regeneration.
@@ -21,22 +21,23 @@
 ```
 Client (browser / frontend)
         │
-        ├─ POST /report/imdb  ──────────────────────────────────────┐
-        ├─ POST /report/csv   ──────────────────────────────────────┤
-        └─ POST /report/chat  ──────────────────────────────────────┤
-                                                                     ▼
-                                              api/routes/report.py  ← this module
-                                                         │
-                                ┌────────────────────────┼──────────────────────────┐
-                                ▼                        ▼                          ▼
-                   app.scraper_service       app.report_generator        app.sentiment_analyzer
-                   (blocking I/O,            (async pipeline,            (_get_async_openai_client)
-                    run in thread pool)       sentiment + LLM)
-                                                         │
-                                ┌────────────────────────┤
-                                ▼                        ▼
-                          api.csv_utils             api.db
-                          (parse + detect)          (domain config lookup)
+        ├─ POST /report/imdb  ─────────────────────────────────────┐
+        ├─ POST /report/csv   ─────────────────────────────────────┤
+        ├─ POST /report/url   ─────────────────────────────────────┤
+        └─ POST /report/chat  ─────────────────────────────────────┤
+                                                                    ▼
+                                             api/routes/report.py  ← this module
+                                                        │
+                               ┌────────────────────────┼──────────────────────────┐
+                               ▼                        ▼                          ▼
+                  app.scraper_service       app.report_generator        app.sentiment_analyzer
+                  (blocking I/O,            (async pipeline,            (_get_async_openai_client)
+                   run in thread pool)       sentiment + LLM)
+                                                        │
+                               ┌────────────────────────┤
+                               ▼                        ▼
+                         api.csv_utils             api.db
+                         (parse + detect)          (domain config lookup)
 ```
 
 This module sits at the API boundary layer. It is a FastAPI `APIRouter` mounted under the `/report` prefix and tagged `"report"` for OpenAPI grouping. It contains no business logic itself; all domain work is delegated to service-layer modules.
@@ -63,13 +64,13 @@ _report_cache: dict[str, dict] = {}
 
 An in-memory dictionary that stores generated report data keyed by a UUID string (`report_id`). Each entry maps a `report_id` to a dictionary containing the following keys:
 
-| Key           | Type        | Present In        | Description                                                                     |
-|---------------|-------------|-------------------|---------------------------------------------------------------------------------|
-| `corpus`      | object      | Both flows        | Prebuilt sentence corpus returned by `build_corpus`, used for RAG retrieval     |
-| `report`      | `dict`      | Both flows        | The full report result from `async_generate_report`                             |
-| `title`       | `str`       | Both flows        | Human-readable title for the report (filename or movie title)                   |
-| `movie_title` | `str`       | IMDB flow only    | Movie title; also stored separately for chat prompt labeling                    |
-| `reviews`     | `list[str]` | Both flows        | Original review text strings                                                    |
+| Key           | Type        | Present In          | Description                                                                  |
+|---------------|-------------|---------------------|------------------------------------------------------------------------------|
+| `corpus`      | object      | All flows           | Prebuilt sentence corpus returned by `build_corpus`, used for RAG retrieval  |
+| `report`      | `dict`      | All flows           | The full report result from `async_generate_report`                          |
+| `title`       | `str`       | All flows           | Human-readable title for the report (filename, movie title, or business name)|
+| `movie_title` | `str`       | IMDB flow only      | Movie title; also stored separately for chat prompt labeling                 |
+| `reviews`     | `list[str]` | All flows           | Original review text strings                                                 |
 
 > **Limitations**: This cache is process-scoped and non-persistent. All cached reports are lost on server restart. There is no eviction policy; the cache grows unboundedly over time. In a production deployment, this should be replaced with a distributed cache (e.g., Redis) or persistent storage.
 
@@ -81,7 +82,7 @@ An in-memory dictionary that stores generated report data keyed by a UUID string
 IMDB_URL_RE = re.compile(r"imdb\.com/title/tt\d+", re.I)
 ```
 
-A pre-compiled, case-insensitive regular expression used to validate that submitted URLs conform to the expected IMDB title URL format (e.g., `https://www.imdb.com/title/tt1234567/`). Compiled once at module import time and reused across all requests for efficiency.
+A pre-compiled, case-insensitive regular expression used to validate that submitted URLs conform to the expected IMDB title URL format (e.g., `https://www.imdb.com/title/tt1234567/`). Compiled once at module import time and reused across all requests for efficiency. Used exclusively by `imdb_report`; the more general `url_report` endpoint delegates URL validation to `detect_source`.
 
 ---
 
@@ -138,9 +139,9 @@ Accepts a POST request containing an IMDB movie URL, validates it, and returns a
 
 #### Parameters
 
-| Parameter | Type                | Source             | Description                                                                      |
-|-----------|---------------------|--------------------|----------------------------------------------------------------------------------|
-| `request` | `IMDBReportRequest` | Request body (JSON) | Pydantic model containing `imdb_url: str` and optional `aspects: list[str]`     |
+| Parameter | Type                | Source              | Description                                                                  |
+|-----------|---------------------|---------------------|------------------------------------------------------------------------------|
+| `request` | `IMDBReportRequest` | Request body (JSON) | Pydantic model containing `imdb_url: str` and optional `aspects: list[str]` |
 
 #### Returns
 `StreamingResponse` with:
@@ -152,10 +153,10 @@ Accepts a POST request containing an IMDB movie URL, validates it, and returns a
 
 #### Raises (before streaming begins)
 
-| Condition                                          | HTTP Status | Detail                                                              |
-|----------------------------------------------------|-------------|---------------------------------------------------------------------|
-| URL does not match `imdb\.com/title/tt\d+`         | `400`       | `"Please enter a valid IMDB movie URL (imdb.com/title/tt...)"`.    |
-| `extract_movie_id` raises `ValueError`             | `400`       | Exception message propagated verbatim from `extract_movie_id`       |
+| Condition                                  | HTTP Status | Detail                                                            |
+|--------------------------------------------|-------------|-------------------------------------------------------------------|
+| URL does not match `imdb\.com/title/tt\d+` | `400`       | `"Please enter a valid IMDB movie URL (imdb.com/title/tt...)"` |
+| `extract_movie_id` raises `ValueError`     | `400`       | Exception message propagated verbatim from `extract_movie_id`    |
 
 > **Important**: Once the `StreamingResponse` is returned, subsequent errors are communicated exclusively as SSE `error` events, because HTTP response headers have already been sent to the client.
 
@@ -171,21 +172,22 @@ If the client does not supply an `aspects` list, the module falls back to `MOVIE
 
 The following table describes every SSE event that may be yielded during the stream, in order:
 
-| Event name        | When emitted                                              | Key payload fields                                                       |
-|-------------------|-----------------------------------------------------------|--------------------------------------------------------------------------|
-| `stage`           | Scraping begins                                           | `stage: "scraping"`, `message`                                           |
-| `error`           | Scraping raises an exception or returns no reviews        | `message`                                                                |
-| `done`            | After an `error` event (early exit)                       | `status: "error"`                                                        |
-| `stage`           | Scraping succeeds                                         | `stage: "scraping"`, `message`, `progress`, `total`, `movie_title`      |
-| `warning`         | Fewer than 10 reviews scraped                             | `message`                                                                |
-| `stage`           | Analysis progress (one or more)                           | `stage: "analyzing"`, `message`, `progress`, `total`, spread `data`     |
-| `stage`           | LLM generation begins                                     | `stage: "generating"`, `message`                                         |
-| `aspect_complete` | Each aspect finishes analysis                             | Contents of `data` from `async_generate_report` callback                 |
-| `error`           | `async_generate_report` raises an exception               | `message`                                                                |
-| `done`            | After `error` from report generation (early exit)         | `status: "error"`                                                        |
-| `charts`          | Report generation complete, before final report event     | `distributions` (array of per-aspect sentiment counts and percentages)   |
-| `report`          | Final successful report payload                           | `report_id`, `overall_summary`, `title`, `movie_title`, `n_reviews`, `aspects` |
-| `done`            | Stream completes successfully                             | `status: "complete"`                                                     |
+| Event name        | When emitted                                           | Key payload fields                                                            |
+|-------------------|--------------------------------------------------------|-------------------------------------------------------------------------------|
+| `stage`           | Scraping begins                                        | `stage: "scraping"`, `message`                                                |
+| `error`           | Scraping raises an exception or returns no reviews     | `message`                                                                     |
+| `done`            | After an `error` event (early exit)                    | `status: "error"`                                                             |
+| `stage`           | Scraping succeeds                                      | `stage: "scraping"`, `message`, `progress`, `total`, `movie_title`           |
+| `warning`         | Fewer than 10 reviews scraped                          | `message`                                                                     |
+| `stage`           | Analysis progress (one or more)                        | `stage: "analyzing"`, `message`, `progress`, `total`, spread `data`          |
+| `stage`           | LLM generation begins                                  | `stage: "generating"`, `message`                                              |
+| `insights`        | Insight data available during generation               | Contents of `data` from `async_generate_report` callback                      |
+| `aspect_complete` | Each aspect finishes analysis                          | Contents of `data` from `async_generate_report` callback                      |
+| `error`           | `async_generate_report` raises an exception            | `message`                                                                     |
+| `done`            | After `error` from report generation (early exit)      | `status: "error"`                                                             |
+| `charts`          | Report generation complete, before final report event  | `distributions` (array of per-aspect sentiment counts and percentages)        |
+| `report`          | Final successful report payload                        | `report_id`, `overall_summary`, `title`, `movie_title`, `n_reviews`, `aspects`|
+| `done`            | Stream completes successfully                          | `status: "complete"`                                                          |
 
 #### Inner Components
 
@@ -228,11 +230,12 @@ Yields a `done` event with `"status": "error"` and returns without emitting `cha
 
 Defined inside `event_stream`. Acts as the progress callback passed to `async_generate_report`. Routes pipeline stage notifications to the SSE queue.
 
-| `stage` value       | Enqueued Event    | Notes                                                               |
-|---------------------|-------------------|---------------------------------------------------------------------|
-| `"analyzing"`       | `stage`           | Formats a progress message; spreads all `data` fields into payload  |
-| `"generating"`      | `stage`           | Signals that LLM report generation has begun                        |
-| `"aspect_complete"` | `aspect_complete` | Passes `data` through unchanged for incremental client rendering    |
+| `stage` value       | Enqueued Event    | Notes                                                              |
+|---------------------|-------------------|--------------------------------------------------------------------|
+| `"analyzing"`       | `stage`           | Formats a progress message; spreads all `data` fields into payload |
+| `"generating"`      | `stage`           | Signals that LLM report generation has begun                       |
+| `"insights"`        | `insights`        | Passes `data` through unchanged for incremental client rendering   |
+| `"aspect_complete"` | `aspect_complete` | Passes `data` through unchanged for incremental client rendering   |
 
 Any unrecognized `stage` value is silently ignored.
 
@@ -266,15 +269,7 @@ Accepts a multipart form POST containing a CSV file of reviews and optional conf
 
 #### Parameters
 
-| Parameter       | Type          | Source      | Description                                                                     |
-|-----------------|---------------|-------------|---------------------------------------------------------------------------------|
-| `file`          | `UploadFile`  | Form (file) | The CSV file containing reviews; required                                       |
-| `domain_id`     | `str \| None` | Form field  | Optional ID of a saved domain configuration to look up via `api.db.get_domain` |
-| `domain`        | `str`         | Form field  | Fallback domain label string; defaults to `"product"`                           |
-| `aspects`       | `str \| None` | Form field  | Comma-separated aspect names; parsed into a list if provided                    |
-| `review_column` | `str \| None` | Form field  | Explicit column name to use for review text; auto-detected if `None`            |
-
-#### Returns
-`StreamingResponse` — identical structure and headers to `imdb_report`.
-
-#### Raises
+| Parameter       | Type          | Source      | Description                                                                      |
+|-----------------|---------------|-------------|----------------------------------------------------------------------------------|
+| `file`          | `UploadFile`  | Form (file) | The CSV file containing reviews; required                                        |
+| `domain_id`     | `str \| None` |

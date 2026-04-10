@@ -8,16 +8,17 @@ import {
   Tooltip,
 } from 'recharts';
 import type { ChartDistribution } from '../../types/report';
+import { COLORS, TOOLTIP_STYLE, formatAspect } from './chartUtils';
+import { ChartEmptyState } from './ChartEmptyState';
 
 interface AspectRadarChartProps {
   distributions: ChartDistribution[];
 }
 
-function formatAspect(aspect: string) {
-  return aspect.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
 export function AspectRadarChart({ distributions }: AspectRadarChartProps) {
+  const allZero = distributions.every(d => d.positive + d.negative === 0);
+  if (allZero) return <ChartEmptyState message="No positivity data to display" />;
+
   const data = distributions.map(d => {
     const mentioned = d.positive + d.negative;
     const positivityScore = mentioned > 0 ? (d.positive / mentioned) * 100 : 0;
@@ -35,13 +36,13 @@ export function AspectRadarChart({ distributions }: AspectRadarChartProps) {
         <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fontSize: 10, fill: '#6b7280' }} />
         <Tooltip
           formatter={(value) => `${value}%`}
-          contentStyle={{ background: '#111827', border: '1px solid #374151', color: '#f9fafb', borderRadius: '8px' }}
+          contentStyle={TOOLTIP_STYLE}
         />
         <Radar
           name="Positivity Score"
           dataKey="score"
-          stroke="#3b82f6"
-          fill="#3b82f6"
+          stroke={COLORS.primary}
+          fill={COLORS.primary}
           fillOpacity={0.3}
         />
       </RadarChart>

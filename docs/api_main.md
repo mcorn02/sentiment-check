@@ -111,6 +111,7 @@ app = FastAPI(
 | `batch_router` | `/api` | `api.routes.batch` |
 | `domains_router` | `/api` | `api.routes.domains` |
 | `report_router` | `/api` | `api.routes.report` |
+| `research_router` | `/api` | `api.routes.research` |
 
 ---
 
@@ -225,47 +226,48 @@ app.mount(
 
 ## 3. What Changed
 
-This commit makes a **targeted metadata update** to the `FastAPI` application instance, rebranding the API from its previous general-purpose identity to a more specifically scoped product identity.
+This commit makes a **targeted, additive change** to the application: the `research` router is imported and registered as a new API router under the `/api` prefix.
 
 ---
 
-### 3.1 Application Title Updated
+### 3.1 New Import: `research_router`
 
 ```diff
--    title="Aspect Sentiment API",
-+    title="Sentiment Check API",
++from api.routes.research import router as research_router
 ```
 
-**What changed:** The human-readable title of the application has been renamed from `"Aspect Sentiment API"` to `"Sentiment Check API"`.
+**What changed:** A new import statement was added to bring in the router defined in `api.routes.research`, aliased as `research_router` for consistency with the naming convention used for other routers in this module.
 
-**Why it matters:** The `title` field is surfaced directly in the auto-generated OpenAPI schema and is displayed prominently in the interactive Swagger UI (`/docs`) and ReDoc (`/redoc`) interfaces. Any API client, SDK generator, or documentation tooling that reads from `/openapi.json` will now see `"Sentiment Check API"` as the API name. This is a **user-visible change** affecting developer-facing documentation.
+**Why it matters:** Without this import, the `research` route module would be entirely unreachable by the application, regardless of what endpoints it defines. This is a prerequisite for the router registration below.
 
 ---
 
-### 3.2 Application Description Updated
+### 3.2 New Router Registration: `research_router`
 
 ```diff
--    description="Domain-agnostic aspect-based sentiment analysis with batch processing and business reports.",
-+    description="AI-powered movie review sentiment analysis with aspect-level breakdowns and interactive chat.",
++app.include_router(research_router, prefix="/api")
 ```
 
-**What changed:** The API's description string has been updated to reflect a narrower, more focused product scope:
+**What changed:** `research_router` is now included in the application's router table under the `/api` prefix, alongside the four previously registered routers (`analyze`, `batch`, `domains`, `report`).
+
+**Why it matters functionally:** This is the change that makes all endpoints defined within `api.routes.research` **publicly reachable** via the running application. Any routes declared in that module (e.g., `GET /api/research/...` or `POST /api/research/...`, depending on what the router defines) are now part of the live API surface and will also appear in the auto-generated OpenAPI schema at `/docs` and `/openapi.json`.
+
+**Behavioral differences from before:**
 
 | Aspect | Before | After |
 |--------|--------|-------|
-| Scope | Domain-agnostic (general-purpose) | Movie reviews (domain-specific) |
-| Feature framing | Batch processing + business reports | Aspect-level breakdowns + interactive chat |
-| Positioning | Enterprise/analytical tool | AI-powered consumer product |
+| `api.routes.research` endpoints | Not reachable — module not loaded | Fully reachable under `/api` prefix |
+| OpenAPI schema | No research endpoints listed | Research endpoints appear in `/docs` and `/openapi.json` |
+| Router count | 4 routers registered | 5 routers registered |
+| `api.routes.research` module | Not imported at startup | Imported and initialized at startup |
 
-**Why it matters:** Like the title, the description is embedded in the OpenAPI schema and rendered in the Swagger UI and ReDoc documentation pages. The change signals a deliberate **product pivot** — away from a generic, domain-agnostic sentiment analysis platform toward a specialized movie review analysis tool with conversational (chat) capabilities. This description change is **user-visible** to any developer consuming the API documentation.
-
-**Behavioral note:** The description change is purely cosmetic from a runtime perspective — it does not alter any routing logic, middleware configuration, database behavior, or response structure. However, it accurately documents a likely shift in the underlying route handler implementations (particularly the introduction or emphasis of an interactive chat feature).
+**Registration order note:** `research_router` is appended after `report_router`, placing it last among the API routers but still before the conditional catch-all `serve_spa` route (if registered). This ordering is correct and ensures the catch-all does not shadow any research API endpoints.
 
 ---
 
-### 3.3 No Structural Changes
+### 3.3 No Other Changes
 
-The version number (`0.2.0`), all registered routers, the CORS middleware configuration, the lifespan handler, the health endpoint, and the SPA serving logic are **unchanged** in this commit. The diff is entirely contained within the `FastAPI(...)` constructor call.
+The application title, description, version, CORS middleware configuration, lifespan handler, health endpoint, SPA static file serving logic, and all pre-existing router registrations are **unchanged** in this commit. The diff is entirely contained within the import block and the router registration block.
 
 ---
 
@@ -280,6 +282,7 @@ The version number (`0.2.0`), all registered routers, the CORS middleware config
 | `batch_router` | `api.routes.batch` | Handles batch sentiment analysis jobs |
 | `domains_router` | `api.routes.domains` | Manages domain definitions/configurations |
 | `report_router` | `api.routes.report` | Generates business-level sentiment reports |
+| `research_router` | `api.routes.research` | Exposes research-oriented endpoints (newly added) |
 
 ### External / Third-Party Imports
 
@@ -300,7 +303,7 @@ The version number (`0.2.0`), all registered routers, the CORS middleware config
 | **ASGI server** (`uvicorn`) | References `api.main:app` directly as the ASGI callable. Entry command: `uvicorn api.main:app --reload` |
 | **Frontend (React SPA)** | All API calls target routes registered in this module; static file serving is also configured here for production deployments |
 | **Health monitoring / load balancers** | Polls `GET /api/health` |
-| **OpenAPI clients / SDK generators** | Schema generated from the `app` instance reflects all routers, metadata, and titles defined here |
+| **OpenAPI clients / SDK generators** | Schema generated from the `app` instance reflects all routers, metadata, and titles defined here — now including the research router's endpoints |
 
 ### Filesystem Dependencies
 

@@ -30,7 +30,13 @@
       "Bash(find /Users/michaelcorn/Desktop/product_reviewer -type f \\\\\\(-name *credentials* -o -name *secret* -o -name *token* -o -name *auth* \\\\\\) ! -path */venv/* ! -path */.git/* ! -path */node_modules/*)",
       "Bash(git rm:*)",
       "Bash(python -c \":*)",
-      "Bash(source /Users/michaelcorn/Desktop/product_reviewer/venv/bin/activate)"
+      "Bash(source /Users/michaelcorn/Desktop/product_reviewer/venv/bin/activate)",
+      "Bash(xargs ls:*)",
+      "Bash(gh pr:*)",
+      "Bash(~/.pyenv/versions/venv311/bin/python -c \"from api.routes.report import router; print\\('OK'\\)\")",
+      "Skill(update-config)",
+      "Bash(grep database\\\\|imdb_playwright\\\\|scraper_service:*)",
+      "Bash(~/.pyenv/versions/venv311/bin/python:*)"
     ]
   }
 }

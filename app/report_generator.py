@@ -24,6 +24,7 @@ from .sentiment_analyzer import (
     analyze,
     async_analyze_batch,
 )
+from .insights_agent import async_generate_insights
 
 _reranker_model = None
 
@@ -402,11 +403,23 @@ and what needs improvement. Be direct and specific."""
         max_tokens=200,
     )
 
-    return {
+    overall_summary = resp.choices[0].message.content.strip()
+
+    # Step 5: Generate insights
+    await _notify("generating", {"message": "Generating insights..."})
+    report_data = {
         "n_reviews": len(reviews),
         "aspects": aspect_reports,
-        "overall_summary": resp.choices[0].message.content.strip(),
+        "overall_summary": overall_summary,
     }
+    try:
+        insights = await async_generate_insights(report_data, domain=domain)
+    except Exception:
+        insights = []
+    report_data["insights"] = insights
+    await _notify("insights", {"insights": insights})
+
+    return report_data
 
 
 def format_report_markdown(report: dict) -> str:

@@ -14,9 +14,9 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 
 from api.csv_utils import detect_review_column, parse_csv_bytes
-from api.models import IMDBReportRequest, ChatRequest
+from api.models import IMDBReportRequest, URLReportRequest, ChatRequest
 from app.config import DEFAULT_ASPECTS, MOVIE_ASPECTS, OPENAI_MODEL, OPENAI_MAX_TOKENS
-from app.scraper_service import extract_movie_id, scrape_imdb_reviews
+from app.scraper_service import extract_movie_id, scrape_imdb_reviews, scrape_reviews, detect_source
 from app.report_generator import (
     async_generate_report,
     build_corpus,
@@ -105,6 +105,8 @@ async def imdb_report(request: IMDBReportRequest):
                     "stage": "generating",
                     "message": data.get("message", "Generating report..."),
                 }))
+            elif stage == "insights":
+                event_queue.put_nowait(("insights", data))
             elif stage == "aspect_complete":
                 event_queue.put_nowait(("aspect_complete", data))
 
@@ -266,6 +268,180 @@ async def csv_report(
                     "stage": "generating",
                     "message": data.get("message", "Generating report..."),
                 }))
+            elif stage == "insights":
+                event_queue.put_nowait(("insights", data))
+            elif stage == "aspect_complete":
+                event_queue.put_nowait(("aspect_complete", data))
+
+        event_queue = asyncio.Queue()
+
+        async def run_report():
+            try:
+                report = await async_generate_report(
+                    review_texts, resolved_aspects, on_stage=on_stage, domain=domain_label
+                )
+                event_queue.put_nowait(("_result", report))
+            except Exception as e:
+                event_queue.put_nowait(("error", {"message": str(e)}))
+            finally:
+                event_queue.put_nowait(("_done", None))
+
+        task = asyncio.create_task(run_report())
+
+        report_result = None
+        while True:
+            event_type, event_data = await event_queue.get()
+            if event_type == "_done":
+                break
+            elif event_type == "_result":
+                report_result = event_data
+                continue
+            yield _sse_event(event_type, event_data)
+
+        await task
+
+        if report_result is None:
+            yield _sse_event("done", {"status": "error"})
+            return
+
+        # Cache corpus + report for chat queries
+        report_id = str(uuid.uuid4())
+        corpus = await asyncio.to_thread(build_corpus, review_texts)
+        _report_cache[report_id] = {
+            "corpus": corpus,
+            "report": report_result,
+            "title": title,
+            "reviews": review_texts,
+        }
+
+        # Send chart data
+        distributions = []
+        for ar in report_result["aspects"]:
+            distributions.append({
+                "aspect": ar["name"],
+                "positive": ar["distribution"]["positive"]["count"],
+                "negative": ar["distribution"]["negative"]["count"],
+                "not_mentioned": ar["distribution"]["not_mentioned"]["count"],
+                "positive_pct": ar["distribution"]["positive"]["pct"],
+                "negative_pct": ar["distribution"]["negative"]["pct"],
+                "not_mentioned_pct": ar["distribution"]["not_mentioned"]["pct"],
+            })
+
+        yield _sse_event("charts", {"distributions": distributions})
+
+        yield _sse_event("report", {
+            "report_id": report_id,
+            "overall_summary": report_result["overall_summary"],
+            "title": title,
+            "n_reviews": report_result["n_reviews"],
+            "aspects": report_result["aspects"],
+        })
+
+        yield _sse_event("done", {"status": "complete"})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/url")
+async def url_report(request: URLReportRequest):
+    """
+    Stream a report from a review page URL (Google Maps, Yelp, or IMDB) via SSE.
+
+    Stages: scraping → analyzing → generating → done
+    """
+    from api.db import get_domain
+
+    try:
+        source = detect_source(request.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Resolve domain + aspects
+    domain_label = request.domain
+    resolved_aspects = request.aspects
+
+    if request.domain_id:
+        domain_cfg = get_domain(request.domain_id)
+        if not domain_cfg:
+            raise HTTPException(status_code=404, detail=f"Domain '{request.domain_id}' not found")
+        domain_label = domain_cfg["name"]
+        if resolved_aspects is None:
+            resolved_aspects = domain_cfg["aspects"]
+
+    # For IMDB without explicit aspects, use movie presets
+    if source == "imdb" and not resolved_aspects:
+        resolved_aspects = MOVIE_ASPECTS
+    elif not resolved_aspects:
+        resolved_aspects = DEFAULT_ASPECTS
+
+    async def event_stream():
+        # Stage 1: Scraping
+        yield _sse_event("stage", {
+            "stage": "scraping",
+            "message": f"Scraping reviews from {source.title()}...",
+        })
+
+        try:
+            reviews_data = await asyncio.to_thread(
+                scrape_reviews, request.url, request.max_reviews
+            )
+        except Exception as e:
+            yield _sse_event("error", {"message": f"Scraping failed: {e}"})
+            yield _sse_event("done", {"status": "error"})
+            return
+
+        if not reviews_data:
+            yield _sse_event("error", {
+                "message": f"No reviews found at this {source.title()} URL.",
+            })
+            yield _sse_event("done", {"status": "error"})
+            return
+
+        review_texts = [r["review_text"] for r in reviews_data if r.get("review_text")]
+
+        # Determine title from scraped data
+        title = (
+            reviews_data[0].get("movie_title")
+            or reviews_data[0].get("business_name")
+            or f"{source.title()} Reviews"
+        )
+
+        yield _sse_event("stage", {
+            "stage": "scraping",
+            "message": f"Scraped {len(review_texts)} reviews for '{title}'",
+            "progress": len(review_texts),
+            "total": len(review_texts),
+            "title": title,
+        })
+
+        if len(review_texts) < 5:
+            yield _sse_event("warning", {
+                "message": f"Only {len(review_texts)} reviews found — results may be less reliable.",
+            })
+
+        # Stage 2 & 3: Analysis + Report generation
+        async def on_stage(stage, data=None):
+            if stage == "analyzing":
+                event_queue.put_nowait(("stage", {
+                    "stage": "analyzing",
+                    "message": f"Analyzing sentiment... ({data.get('progress', 0)}/{data.get('total', 0)})",
+                    **data,
+                }))
+            elif stage == "generating":
+                event_queue.put_nowait(("stage", {
+                    "stage": "generating",
+                    "message": data.get("message", "Generating report..."),
+                }))
+            elif stage == "insights":
+                event_queue.put_nowait(("insights", data))
             elif stage == "aspect_complete":
                 event_queue.put_nowait(("aspect_complete", data))
 

@@ -9,16 +9,17 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { ChartDistribution } from '../../types/report';
+import { COLORS, TOOLTIP_STYLE, formatAspect } from './chartUtils';
+import { ChartEmptyState } from './ChartEmptyState';
 
 interface SentimentBarChartProps {
   distributions: ChartDistribution[];
 }
 
-function formatAspect(aspect: string) {
-  return aspect.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
 export function SentimentBarChart({ distributions }: SentimentBarChartProps) {
+  const allZero = distributions.every(d => d.positive + d.negative === 0);
+  if (allZero) return <ChartEmptyState message="No reviews mentioned any aspect" />;
+
   const hasLowCoverage = distributions.some(d => (d.positive_pct + d.negative_pct) < 20);
 
   const data = distributions.map(d => {
@@ -32,6 +33,7 @@ export function SentimentBarChart({ distributions }: SentimentBarChartProps) {
       Positive: Math.round(posOfMentioned * 10) / 10,
       Negative: Math.round(negOfMentioned * 10) / 10,
       mentionRate: Math.round(mentionRate),
+      mentioned,
     };
   });
 
@@ -46,17 +48,17 @@ export function SentimentBarChart({ distributions }: SentimentBarChartProps) {
             formatter={(value, name, props) => {
               const mentionRate = props.payload?.mentionRate;
               const suffix = mentionRate !== undefined && mentionRate < 20
-                ? ` (⚠ only ${mentionRate}% mentioned)`
+                ? ` (only ${mentionRate}% mentioned)`
                 : mentionRate !== undefined
                   ? ` (${mentionRate}% mentioned)`
                   : '';
               return [`${Number(value).toFixed(1)}%${suffix}`, name];
             }}
-            contentStyle={{ background: '#111827', border: '1px solid #374151', color: '#f9fafb', borderRadius: '8px' }}
+            contentStyle={TOOLTIP_STYLE}
           />
           <Legend />
-          <Bar dataKey="Positive" stackId="a" fill="#22c55e" radius={[0, 0, 0, 0]} />
-          <Bar dataKey="Negative" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="Positive" stackId="a" fill={COLORS.positive} radius={[0, 0, 0, 0]} />
+          <Bar dataKey="Negative" stackId="a" fill={COLORS.negative} radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
       {hasLowCoverage && (
