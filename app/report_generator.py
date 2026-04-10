@@ -174,6 +174,7 @@ def generate_report(
     reviews: list[str],
     aspects: list[str] | None = None,
     method: str = "LLM (OpenAI)",
+    domain: str = "product",
 ) -> dict:
     """
     End-to-end report generation over a corpus of reviews.
@@ -191,7 +192,7 @@ def generate_report(
     # Step 1: Run sentiment analysis on every review
     all_results = []  # list of list-of-dicts, one per review
     for review in reviews:
-        df = analyze(review, aspects, method)
+        df = analyze(review, aspects, method, domain=domain)
         all_results.append(df.to_dict("records"))
 
     # Step 2: Build RAG corpus
@@ -298,6 +299,7 @@ async def async_generate_report(
     reviews: list[str],
     aspects: list[str] | None = None,
     on_stage: callable = None,
+    domain: str = "product",
 ) -> dict:
     """
     Async end-to-end report generation with streaming callbacks.
@@ -306,6 +308,7 @@ async def async_generate_report(
         reviews: List of review texts
         aspects: Aspects to analyze (defaults to DEFAULT_ASPECTS)
         on_stage: Optional async callback(stage, data) for progress updates
+        domain: Domain label for LLM context (e.g. "restaurant", "software")
 
     Returns:
         dict with n_reviews, aspects (list of aspect reports), overall_summary
@@ -326,7 +329,7 @@ async def async_generate_report(
         pass
 
     all_results = await async_analyze_batch(
-        reviews, aspects, domain="movie", on_progress=_on_analysis_progress,
+        reviews, aspects, domain=domain, on_progress=_on_analysis_progress,
     )
 
     await _notify("analyzing", {"progress": len(reviews), "total": len(reviews)})

@@ -1,4 +1,4 @@
-# Product Reviewer - Aspect-Based Sentiment Analysis
+# Sentiment Check
 
 A web application that scrapes IMDB reviews for any movie and generates a structured sentiment report broken down by aspect (acting, plot, pacing, etc.), powered by two analysis methods:
 

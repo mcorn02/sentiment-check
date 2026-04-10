@@ -8,14 +8,24 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if it exists
 load_dotenv()
 
-# Default aspects for sentiment analysis
+# General-purpose default aspects (domain-agnostic)
 DEFAULT_ASPECTS = [
+    "quality",
+    "value",
+    "service",
+    "features",
+    "reliability",
+    "usability",
+]
+
+# Legacy movie aspects (used by IMDB endpoint)
+MOVIE_ASPECTS = [
     "acting_performances",
     "story_plot",
     "pacing",
     "visuals",
     "directing",
-    "writing"
+    "writing",
 ]
 
 # Default thresholds

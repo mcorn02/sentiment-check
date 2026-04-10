@@ -48,6 +48,13 @@ def init_db() -> None:
 
 PRESETS = [
     {
+        "id": "general",
+        "name": "General",
+        "aspects": ["quality", "value", "service", "features", "reliability", "usability"],
+        "description": "General-purpose review analysis for any product or service",
+        "is_preset": True,
+    },
+    {
         "id": "movie",
         "name": "Movie",
         "aspects": ["acting_performances", "story_plot", "pacing", "visuals", "directing", "writing"],
@@ -73,6 +80,20 @@ PRESETS = [
         "name": "Hotel",
         "aspects": ["room_quality", "cleanliness", "service", "location", "value_for_money", "amenities"],
         "description": "A hotel or accommodation property",
+        "is_preset": True,
+    },
+    {
+        "id": "ecommerce",
+        "name": "E-Commerce",
+        "aspects": ["product_quality", "shipping", "customer_service", "value_for_money", "packaging", "returns"],
+        "description": "An online retail product or marketplace",
+        "is_preset": True,
+    },
+    {
+        "id": "healthcare",
+        "name": "Healthcare",
+        "aspects": ["care_quality", "wait_times", "staff", "communication", "facilities", "billing"],
+        "description": "A healthcare provider or medical facility",
         "is_preset": True,
     },
 ]

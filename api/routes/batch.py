@@ -2,14 +2,12 @@
 Batch analysis endpoints: file upload + async job polling.
 """
 from __future__ import annotations
-import io
 import uuid
 from datetime import datetime, timezone
 
-import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
 
+from api.csv_utils import detect_review_column, parse_csv_bytes
 from api.db import get_domain, insert_job, update_job_progress, complete_job, fail_job, get_job
 from api.models import (
     AnalysisMethod,
@@ -32,25 +30,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _detect_review_column(df: pd.DataFrame, hint: str | None) -> str:
-    """Return the column name containing review text."""
-    if hint and hint in df.columns:
-        return hint
-    # Common column name candidates in priority order
-    candidates = ["review", "text", "comment", "body", "content", "description", "feedback"]
-    for c in candidates:
-        if c in df.columns:
-            return c
-        if c in [col.lower() for col in df.columns]:
-            return next(col for col in df.columns if col.lower() == c)
-    # Fall back to the first string column
-    for col in df.columns:
-        if df[col].dtype == object:
-            return col
-    raise ValueError(
-        f"Could not detect a review text column. Available columns: {list(df.columns)}. "
-        "Pass 'review_column' to specify one."
-    )
+def _detect_review_column(df, hint):
+    """Backward-compat wrapper — delegates to shared utility."""
+    return detect_review_column(df, hint)
 
 
 def _run_batch_job(
@@ -105,12 +87,9 @@ async def submit_batch(
     # Read CSV
     contents = await file.read()
     try:
-        df = pd.read_csv(io.BytesIO(contents), encoding="utf-8", on_bad_lines="skip")
-    except Exception:
-        try:
-            df = pd.read_csv(io.BytesIO(contents), encoding="latin-1", on_bad_lines="skip")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+        df = parse_csv_bytes(contents)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
 
     if df.empty:
         raise HTTPException(status_code=400, detail="Uploaded CSV is empty")

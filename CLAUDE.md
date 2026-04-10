@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Aspect-based sentiment analysis tool for movie reviews. Supports two analysis methods:
+**Sentiment Check** — aspect-based sentiment analysis tool for movie reviews. Supports two analysis methods:
 - **LLM (OpenAI)**: GPT-4o-mini via API — higher accuracy, costs money
 - **Zero-shot NLI (local)**: `typeform/distilbert-base-uncased-mnli` — free, offline, privacy-preserving
 

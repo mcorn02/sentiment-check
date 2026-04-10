@@ -109,3 +109,10 @@ class IMDBReportRequest(BaseModel):
     aspects: list[str] | None = Field(
         None, description="Aspects to analyze (defaults to movie preset)"
     )
+
+
+# ── Report Chat ──────────────────────────────────────────────────────────────
+
+class ChatRequest(BaseModel):
+    report_id: str = Field(..., description="Report ID returned after generation")
+    question: str = Field(..., description="User question about the report")

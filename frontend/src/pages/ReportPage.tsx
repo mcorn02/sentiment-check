@@ -1,11 +1,12 @@
 import { useSSE } from '../hooks/useSSE';
-import { UrlInput } from '../components/UrlInput';
+import { ReviewInput } from '../components/ReviewInput';
 import { ProgressStepper } from '../components/ProgressStepper';
 import { SentimentBarChart } from '../components/charts/SentimentBarChart';
 import { SentimentPieChart } from '../components/charts/SentimentPieChart';
 import { AspectRadarChart } from '../components/charts/AspectRadarChart';
 import { ReportCard } from '../components/report/ReportCard';
 import { AspectSection } from '../components/report/AspectSection';
+import { ReportChat } from '../components/ReportChat';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { AlertTriangle, XCircle } from 'lucide-react';
 
@@ -23,17 +24,17 @@ export function ReportPage() {
         {/* Header */}
         <div className="text-center">
           <h1 className="text-3xl font-bold text-white">
-            Movie Review Analyzer
+            Sentiment Check
           </h1>
           <p className="text-gray-400 mt-1">
-            Paste an IMDB URL to analyze movie reviews with AI-powered sentiment analysis
+            Upload your reviews and get AI-powered sentiment insights by aspect
           </p>
         </div>
 
         {/* Input Form */}
         <Card>
           <CardBody>
-            <UrlInput onSubmit={sse.startReport} isLoading={sse.isRunning} />
+            <ReviewInput onSubmitCSV={sse.startCSVReport} isLoading={sse.isRunning} />
           </CardBody>
         </Card>
 
@@ -67,10 +68,10 @@ export function ReportPage() {
           </Card>
         )}
 
-        {/* ReportCard — overview summary (above charts) */}
+        {/* ReportCard — overview summary */}
         {showReport && sse.report && (
           <ReportCard
-            movieTitle={sse.report.movie_title}
+            title={sse.report.title}
             nReviews={sse.report.n_reviews}
             overallSummary={sse.report.overall_summary}
           />
@@ -94,9 +95,9 @@ export function ReportPage() {
             <Card>
               <CardHeader>
                 <h2 className="text-lg font-semibold text-white">
-                  Mentioned Sentiment
+                  Overall Sentiment
                 </h2>
-                <p className="text-sm text-gray-400">Among reviews that mentioned each aspect</p>
+                <p className="text-sm text-gray-400">Aggregate positive vs. negative across all aspects</p>
               </CardHeader>
               <CardBody>
                 <SentimentPieChart distributions={sse.distributions} />
@@ -128,6 +129,14 @@ export function ReportPage() {
           </div>
         )}
       </div>
+
+      {/* Floating chat widget */}
+      {showReport && sse.report && (
+        <ReportChat
+          reportId={sse.report.report_id}
+          movieTitle={sse.report.title}
+        />
+      )}
     </div>
   );
 }

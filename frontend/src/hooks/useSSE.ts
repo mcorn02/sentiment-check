@@ -12,7 +12,7 @@ interface SSEState {
   stageMessage: string;
   progress: number;
   total: number;
-  movieTitle: string;
+  title: string;
   distributions: ChartDistribution[];
   report: ReportData | null;
   completedAspects: AspectReport[];
@@ -25,7 +25,7 @@ const initialState: SSEState = {
   stageMessage: '',
   progress: 0,
   total: 0,
-  movieTitle: '',
+  title: '',
   distributions: [],
   report: null,
   completedAspects: [],
@@ -43,76 +43,37 @@ export function useSSE() {
     setIsRunning(false);
   }, []);
 
-  const startReport = useCallback(async (imdbUrl: string, aspects?: string[]) => {
-    // Abort any existing request
-    if (abortRef.current) {
-      abortRef.current.abort();
-    }
+  async function consumeSSE(response: Response) {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
 
-    setState(initialState);
-    setIsRunning(true);
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    const controller = new AbortController();
-    abortRef.current = controller;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    try {
-      const body: Record<string, unknown> = { imdb_url: imdbUrl };
-      if (aspects && aspects.length > 0) {
-        body.aspects = aspects;
-      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-      const response = await fetch('/api/report/imdb', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => null);
-        throw new Error(errData?.detail || `HTTP ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        let currentEvent = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ') && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              handleEvent(currentEvent, data);
-            } catch {
-              // Skip malformed JSON
-            }
-            currentEvent = '';
+      let currentEvent = '';
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim();
+        } else if (line.startsWith('data: ') && currentEvent) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            handleEvent(currentEvent, data);
+          } catch {
+            // Skip malformed JSON
           }
+          currentEvent = '';
         }
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setState(prev => ({
-        ...prev,
-        stage: 'error',
-        error: err instanceof Error ? err.message : 'Unknown error',
-      }));
-    } finally {
-      setIsRunning(false);
     }
-  }, []);
+  }
 
   function handleEvent(event: string, data: Record<string, unknown>) {
     switch (event) {
@@ -124,7 +85,7 @@ export function useSSE() {
           stageMessage: stageData.message || prev.stageMessage,
           progress: stageData.progress ?? prev.progress,
           total: stageData.total ?? prev.total,
-          movieTitle: stageData.movie_title || prev.movieTitle,
+          title: stageData.title || stageData.movie_title || prev.title,
         }));
         break;
       }
@@ -146,6 +107,10 @@ export function useSSE() {
       }
       case 'report': {
         const report = data as unknown as ReportData;
+        // Normalize: prefer title, fall back to movie_title for IMDB compat
+        if (!report.title && report.movie_title) {
+          report.title = report.movie_title;
+        }
         setState(prev => ({
           ...prev,
           report,
@@ -180,12 +145,85 @@ export function useSSE() {
     }
   }
 
-  const cancel = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current.abort();
+  const startCSVReport = useCallback(async (file: File, domainId: string, aspects: string[]) => {
+    if (abortRef.current) abortRef.current.abort();
+    setState(initialState);
+    setIsRunning(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (domainId) formData.append('domain_id', domainId);
+      if (aspects.length > 0) formData.append('aspects', aspects.join(','));
+
+      const response = await fetch('/api/report/csv', {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        throw new Error(errData?.detail || `HTTP ${response.status}`);
+      }
+
+      await consumeSSE(response);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setState(prev => ({
+        ...prev,
+        stage: 'error',
+        error: err instanceof Error ? err.message : 'Unknown error',
+      }));
+    } finally {
+      setIsRunning(false);
     }
+  }, []);
+
+  const startIMDBReport = useCallback(async (imdbUrl: string, aspects?: string[]) => {
+    if (abortRef.current) abortRef.current.abort();
+    setState(initialState);
+    setIsRunning(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const body: Record<string, unknown> = { imdb_url: imdbUrl };
+      if (aspects && aspects.length > 0) body.aspects = aspects;
+
+      const response = await fetch('/api/report/imdb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        throw new Error(errData?.detail || `HTTP ${response.status}`);
+      }
+
+      await consumeSSE(response);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setState(prev => ({
+        ...prev,
+        stage: 'error',
+        error: err instanceof Error ? err.message : 'Unknown error',
+      }));
+    } finally {
+      setIsRunning(false);
+    }
+  }, []);
+
+  const cancel = useCallback(() => {
+    if (abortRef.current) abortRef.current.abort();
     setIsRunning(false);
   }, []);
 
-  return { ...state, isRunning, startReport, cancel, reset };
+  return { ...state, isRunning, startCSVReport, startIMDBReport, cancel, reset };
 }

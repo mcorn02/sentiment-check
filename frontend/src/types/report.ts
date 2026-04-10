@@ -27,18 +27,31 @@ export interface ChartDistribution {
 }
 
 export interface ReportData {
+  report_id: string;
   overall_summary: string;
-  movie_title: string;
+  title: string;
+  /** @deprecated Use title instead */
+  movie_title?: string;
   n_reviews: number;
   aspects: AspectReport[];
 }
 
-export type PipelineStage = 'idle' | 'scraping' | 'analyzing' | 'generating' | 'done' | 'error';
+export type PipelineStage = 'idle' | 'parsing' | 'scraping' | 'analyzing' | 'generating' | 'done' | 'error';
 
 export interface StageEvent {
   stage: PipelineStage;
   message?: string;
   progress?: number;
   total?: number;
+  title?: string;
+  /** @deprecated Use title instead */
   movie_title?: string;
+}
+
+export interface DomainConfig {
+  id: string;
+  name: string;
+  aspects: string[];
+  description: string | null;
+  is_preset: boolean;
 }

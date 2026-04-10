@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Aspect Sentiment API",
-    description="Domain-agnostic aspect-based sentiment analysis with batch processing and business reports.",
+    title="Sentiment Check API",
+    description="AI-powered movie review sentiment analysis with aspect-level breakdowns and interactive chat.",
     version="0.2.0",
     lifespan=lifespan,
 )
