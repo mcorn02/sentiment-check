@@ -76,6 +76,12 @@ Stages: `scraping` → `analyzing` → `generating` → `done`
 
 The `aspects` field is optional; omitting it uses the default aspects defined in `app/config.py`.
 
+### CSV Upload
+
+When uploading a CSV file to the batch or report endpoints, the API automatically detects which column contains review text. It checks for common column names in the following priority order: `review`, `text`, `comment`, `body`, `content`, `description`, `feedback`. If none of these are found, it falls back to the first string column. To specify a column explicitly, pass a `review_column` parameter in your request.
+
+CSV files are parsed with UTF-8 encoding, falling back to Latin-1 if needed. Malformed lines are skipped automatically.
+
 ### Command-Line Interface
 
 ```bash

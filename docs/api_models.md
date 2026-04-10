@@ -11,7 +11,7 @@ This module defines all **Pydantic request and response models** (schemas) used 
 - Declares typed request bodies that FastAPI (or equivalent) deserializes and validates from incoming HTTP JSON payloads.
 - Declares typed response models that guarantee consistent, documented JSON output shapes returned to API consumers.
 - Defines shared enumerations (`AnalysisMethod`, `JobStatus`) used by both request and response models.
-- Provides structured intermediate data types (`AspectResult`, `AspectBreakdown`, `PainPoint`, `Report`, etc.) used by the backend pipeline and batch job system.
+- Provides structured intermediate data types (`AspectResult`, `AspectBreakdown`, `PainPoint`, `Report`, `ReviewPrediction`, etc.) used by the backend pipeline and batch job system.
 
 ### Where It Fits in the System
 
@@ -28,7 +28,7 @@ api/models.py  ◄── this file
 Backend Services / Analyzers / Job Workers
 ```
 
-All API route handlers depend on this module. It has no dependencies on other internal modules, making it a **foundational, low-level layer** with no circular import risk.
+All API route handlers depend on this module. It has **no dependencies on other internal modules**, making it a foundational, low-level layer with no circular import risk.
 
 ---
 
@@ -46,14 +46,12 @@ class AnalysisMethod(str, Enum):
     nli = "Zero-shot NLI (local)"
 ```
 
-**What it does:** Enumerates the two supported sentiment analysis backends.
+**What it does:** Enumerates the two supported sentiment analysis backends. Inherits from `str` so members serialize directly to their string values in JSON output and OpenAPI schemas.
 
 | Member | Value | Description |
 |--------|-------|-------------|
 | `llm` | `"LLM (OpenAI)"` | Uses the OpenAI API (remote, requires API key) |
-| `nli` | `"Zero-shot NLI (local)"` | Uses a local zero-shot Natural Language Inference model |
-
-Inherits from `str`, so members serialize to their string values in JSON.
+| `nli` | `"Zero-shot NLI (local)"` | Uses a local zero-shot Natural Language Inference model; no external API required |
 
 ---
 
@@ -67,14 +65,14 @@ class JobStatus(str, Enum):
     failed = "failed"
 ```
 
-**What it does:** Represents the lifecycle state of an asynchronous batch analysis job.
+**What it does:** Represents the full lifecycle state of an asynchronous batch analysis job. Inherits from `str` for transparent JSON serialization.
 
 | Member | Value | Description |
 |--------|-------|-------------|
 | `queued` | `"queued"` | Job has been accepted but not yet started |
 | `running` | `"running"` | Job is actively processing reviews |
-| `done` | `"done"` | Job completed successfully |
-| `failed` | `"failed"` | Job encountered a fatal error |
+| `done` | `"done"` | Job completed successfully; `report` and `predictions` are populated |
+| `failed` | `"failed"` | Job encountered a fatal error; `error` field is populated |
 
 ---
 
@@ -93,13 +91,13 @@ class DomainCreate(BaseModel):
 
 **What it does:** Request body model for creating a new analysis domain configuration.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | `str` | ✅ Yes | Human-readable label for the domain (e.g., `"restaurant"`, `"hotel"`) |
-| `aspects` | `list[str]` | ✅ Yes | List of aspects the analysis will evaluate (e.g., `["food", "service", "ambiance"]`) |
-| `description` | `str \| None` | ❌ No | Optional free-text context injected into LLM prompts to improve accuracy |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `str` | ✅ Yes | — | Human-readable label for the domain (e.g., `"restaurant"`, `"hotel"`) |
+| `aspects` | `list[str]` | ✅ Yes | — | List of aspects the analysis will evaluate (e.g., `["food", "service", "ambiance"]`) |
+| `description` | `str \| None` | ❌ No | `None` | Optional free-text context injected into LLM prompts to improve accuracy |
 
-**Side effects / notes:** `description` is passed directly to the LLM when `AnalysisMethod.llm` is used; it should be written as a concise system context string.
+**Side effects / notes:** When `AnalysisMethod.llm` is used, `description` is passed directly as system-level context to the LLM. It should be written as a concise descriptive string that helps the model understand the domain.
 
 ---
 
@@ -111,14 +109,14 @@ class DomainResponse(DomainCreate):
     is_preset: bool
 ```
 
-**What it does:** Response model returned when reading or creating a domain. Extends `DomainCreate` with server-assigned fields.
+**What it does:** Response model returned when reading or creating a domain. Extends `DomainCreate` with server-assigned identity and classification fields.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `str` | Server-generated unique identifier for the domain |
-| `is_preset` | `bool` | `True` if this domain is a built-in preset; `False` if user-created |
+| `is_preset` | `bool` | `True` if this is a built-in preset domain; `False` if user-created |
 
-Inherits all fields from `DomainCreate`.
+Inherits all fields from `DomainCreate`: `name`, `aspects`, `description`.
 
 ---
 
@@ -137,17 +135,17 @@ class AnalyzeRequest(BaseModel):
     method: AnalysisMethod = AnalysisMethod.llm
 ```
 
-**What it does:** Request body for the single-review sentiment analysis endpoint.
+**What it does:** Request body for the single-review sentiment analysis endpoint. Supports multiple resolution strategies for determining which domain configuration and aspects to use.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `review` | `str` | ✅ Yes | — | The raw review text to analyze |
-| `domain_id` | `str \| None` | ❌ No | `None` | ID of a saved `DomainResponse`; if provided, the server loads aspects and description from it |
+| `domain_id` | `str \| None` | ❌ No | `None` | ID of a saved `DomainResponse`; if provided, the server loads aspects and description from the stored domain config |
 | `domain` | `str` | ❌ No | `"product"` | Fallback domain label used when `domain_id` is absent |
-| `aspects` | `list[str] \| None` | ❌ No | `None` | Explicit aspect list; overrides whatever the domain config specifies |
-| `method` | `AnalysisMethod` | ❌ No | `AnalysisMethod.llm` | Which analysis backend to use |
+| `aspects` | `list[str] \| None` | ❌ No | `None` | Explicit aspect list; overrides whatever the resolved domain config specifies |
+| `method` | `AnalysisMethod` | ❌ No | `AnalysisMethod.llm` | Which analysis backend to invoke |
 
-**Resolution priority:** `domain_id` → saved config aspects → `aspects` override → `domain` fallback label.
+**Resolution priority (server-side):** `domain_id` (loads saved config) → `aspects` override (overrides config aspects if present) → `domain` fallback label (used when no `domain_id` is given).
 
 ---
 
@@ -159,14 +157,14 @@ class AspectResult(BaseModel):
     sentiment: str  # positive | negative | not_mentioned
 ```
 
-**What it does:** Represents the analysis result for a single aspect within one review.
+**What it does:** Represents the analysis outcome for a single aspect within one review. Used as a building block inside both `AnalyzeResponse` and `ReviewPrediction`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `aspect` | `str` | The aspect name (e.g., `"service"`) |
+| `aspect` | `str` | The aspect name (e.g., `"service"`, `"battery life"`) |
 | `sentiment` | `str` | One of `"positive"`, `"negative"`, or `"not_mentioned"` |
 
-**Note:** `sentiment` is typed as `str` rather than an `Enum`, allowing the backend flexibility in edge-case output while still documenting the expected contract in comments.
+**Note:** `sentiment` is typed as plain `str` rather than an `Enum`. This gives the backend flexibility to handle edge-case model outputs while the comment documents the expected contract. Consumers should treat any value outside the three documented strings as an anomaly.
 
 ---
 
@@ -180,14 +178,14 @@ class AnalyzeResponse(BaseModel):
     results: list[AspectResult]
 ```
 
-**What it does:** Response body returned by the single-review analysis endpoint.
+**What it does:** Response body returned by the single-review analysis endpoint. Echoes back the resolved configuration alongside the per-aspect results.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `domain` | `str` | The domain label that was used for analysis |
 | `aspects` | `list[str]` | The full list of aspects that were evaluated |
-| `method` | `str` | Human-readable string of the analysis method used |
-| `results` | `list[AspectResult]` | One `AspectResult` per aspect |
+| `method` | `str` | Human-readable string of the analysis method used (mirrors `AnalysisMethod` value) |
+| `results` | `list[AspectResult]` | One `AspectResult` per aspect in the `aspects` list |
 
 ---
 
@@ -204,13 +202,13 @@ class JobSubmitResponse(BaseModel):
     message: str
 ```
 
-**What it does:** Immediate response returned when a batch job is accepted for processing.
+**What it does:** Immediate acknowledgement response returned when a batch job is accepted for asynchronous processing.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `job_id` | `str` | Unique identifier to poll for status |
-| `status` | `JobStatus` | Always `JobStatus.queued` at submission time |
-| `message` | `str` | Human-readable confirmation message |
+| `job_id` | `str` | Unique identifier used to poll for job status |
+| `status` | `JobStatus` | Always `JobStatus.queued` at the moment of submission |
+| `message` | `str` | Human-readable confirmation string |
 
 ---
 
@@ -225,17 +223,17 @@ class AspectBreakdown(BaseModel):
     total_mentioned: int
 ```
 
-**What it does:** Aggregated sentiment statistics for one aspect across all reviews in a batch job.
+**What it does:** Aggregated sentiment statistics for one aspect computed across all reviews in a completed batch job.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `aspect` | `str` | Aspect name |
-| `positive_pct` | `float` | Percentage of reviews mentioning this aspect positively |
-| `negative_pct` | `float` | Percentage of reviews mentioning this aspect negatively |
+| `positive_pct` | `float` | Percentage of reviews that mentioned this aspect positively |
+| `negative_pct` | `float` | Percentage of reviews that mentioned this aspect negatively |
 | `not_mentioned_pct` | `float` | Percentage of reviews that did not mention this aspect |
-| `total_mentioned` | `int` | Count of reviews where the aspect was explicitly mentioned |
+| `total_mentioned` | `int` | Count of reviews where the aspect was explicitly mentioned (i.e., not `"not_mentioned"`) |
 
-**Note:** Percentages are expected to be in the range `[0.0, 100.0]`. `positive_pct + negative_pct + not_mentioned_pct` should sum to `100.0`.
+**Note:** Percentages are expected in the range `[0.0, 100.0]`. `positive_pct + negative_pct + not_mentioned_pct` should sum to approximately `100.0`. No Pydantic validator enforces this invariant at the model level.
 
 ---
 
@@ -248,13 +246,13 @@ class PainPoint(BaseModel):
     example_quotes: list[str]
 ```
 
-**What it does:** Highlights a specific aspect that received significant negative sentiment, with supporting evidence.
+**What it does:** Highlights a specific aspect that received significant negative sentiment across the batch, with representative evidence excerpts.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `aspect` | `str` | The problematic aspect |
+| `aspect` | `str` | The aspect identified as problematic |
 | `negative_count` | `int` | Total number of reviews that rated this aspect negatively |
-| `example_quotes` | `list[str]` | Representative review excerpts showing the negative sentiment |
+| `example_quotes` | `list[str]` | Representative review excerpts demonstrating the negative sentiment |
 
 ---
 
@@ -270,16 +268,16 @@ class Report(BaseModel):
     llm_summary: str | None = None
 ```
 
-**What it does:** Complete aggregated report produced at the end of a batch job.
+**What it does:** Complete aggregated report produced at the conclusion of a batch job. Embedded inside `JobStatusResponse` when `status` is `done`.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `total_reviews` | `int` | ✅ Yes | Total number of reviews processed |
-| `domain` | `str` | ✅ Yes | Domain used for the analysis |
-| `aspects` | `list[str]` | ✅ Yes | Aspects that were analyzed |
-| `breakdown` | `list[AspectBreakdown]` | ✅ Yes | Per-aspect statistical breakdown |
-| `pain_points` | `list[PainPoint]` | ✅ Yes | Sorted worst-first list of problematic aspects |
-| `llm_summary` | `str \| None` | ❌ No | Optional natural-language narrative summary generated by the LLM |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `total_reviews` | `int` | ✅ Yes | — | Total number of reviews processed in the batch |
+| `domain` | `str` | ✅ Yes | — | Domain label used for the analysis |
+| `aspects` | `list[str]` | ✅ Yes | — | Full list of aspects that were evaluated |
+| `breakdown` | `list[AspectBreakdown]` | ✅ Yes | — | Per-aspect statistical breakdown, one entry per aspect |
+| `pain_points` | `list[PainPoint]` | ✅ Yes | — | Aspects with high negative sentiment, sorted worst-first by `negative_count` |
+| `llm_summary` | `str \| None` | ❌ No | `None` | Optional natural-language narrative summary generated by the LLM after batch completion |
 
 ---
 
@@ -292,13 +290,13 @@ class ReviewPrediction(BaseModel):
     results: list[AspectResult]
 ```
 
-**What it does:** Per-review prediction record stored as part of a job's detailed output.
+**What it does:** Per-review prediction record capturing the individual sentiment results for one review in the batch. Collected into the `predictions` list of `JobStatusResponse`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `review_index` | `int` | Zero-based position of this review in the input batch |
-| `review_snippet` | `str` | First 120 characters of the review text (for display purposes) |
-| `results` | `list[AspectResult]` | Aspect-level sentiment results for this review |
+| `review_snippet` | `str` | First 120 characters of the review text, used for display and identification purposes |
+| `results` | `list[AspectResult]` | Aspect-level sentiment results for this specific review |
 
 ---
 
@@ -316,18 +314,18 @@ class JobStatusResponse(BaseModel):
     completed_at: str | None = None
 ```
 
-**What it does:** Full job status payload returned by the job polling endpoint. Field availability varies by `status`.
+**What it does:** Full job status payload returned by the job polling endpoint. Field availability is conditional on the current `status` value — consumers should check `status` before reading optional fields.
 
-| Field | Type | Available when | Description |
-|-------|------|----------------|-------------|
-| `job_id` | `str` | Always | Unique job identifier |
-| `status` | `JobStatus` | Always | Current job lifecycle state |
-| `progress` | `str \| None` | `running` | Human-readable progress string, e.g. `"12/50 reviews"` |
-| `error` | `str \| None` | `failed` | Error message if the job failed |
-| `predictions` | `list[ReviewPrediction] \| None` | `done` | Full per-review results |
-| `report` | `Report \| None` | `done` | Aggregated batch report |
-| `created_at` | `str` | Always | ISO 8601 timestamp of job creation |
-| `completed_at` | `str \| None` | `done` / `failed` | ISO 8601 timestamp of job completion |
+| Field | Type | Available When | Default | Description |
+|-------|------|----------------|---------|-------------|
+| `job_id` | `str` | Always | — | Unique job identifier |
+| `status` | `JobStatus` | Always | — | Current lifecycle state of the job |
+| `progress` | `str \| None` | `running` | `None` | Human-readable progress indicator, e.g. `"12/50 reviews"` |
+| `error` | `str \| None` | `failed` | `None` | Error message describing why the job failed |
+| `predictions` | `list[ReviewPrediction] \| None` | `done` | `None` | Full per-review sentiment results for every review in the batch |
+| `report` | `Report \| None` | `done` | `None` | Aggregated batch report with breakdowns, pain points, and optional LLM summary |
+| `created_at` | `str` | Always | — | ISO 8601 timestamp of job creation |
+| `completed_at` | `str \| None` | `done` / `failed` | `None` | ISO 8601 timestamp of job completion or failure |
 
 ---
 
@@ -345,53 +343,29 @@ class IMDBReportRequest(BaseModel):
     )
 ```
 
-**What it does:** Request body for the IMDB review scraping and SSE (Server-Sent Events) analysis pipeline. Triggers a streaming pipeline that fetches reviews from an IMDB movie page and performs aspect-based sentiment analysis in real time.
+**What it does:** Request body for the IMDB review scraping and SSE (Server-Sent Events) streaming analysis pipeline. Triggers a real-time pipeline that fetches reviews from an IMDB movie page and performs aspect-based sentiment analysis, emitting incremental results as server-sent events.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `imdb_url` | `str` | ✅ Yes | Full IMDB movie URL (e.g., `https://www.imdb.com/title/tt0111161/`) |
-| `aspects` | `list[str] \| None` | ❌ No | Explicit aspects to evaluate; falls back to the built-in movie domain preset when `None` |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `imdb_url` | `str` | ✅ Yes | — | Full IMDB movie URL (e.g., `https://www.imdb.com/title/tt0111161/`) |
+| `aspects` | `list[str] \| None` | ❌ No | `None` | Explicit aspects to evaluate; when `None`, falls back to the built-in movie domain preset |
 
 **Side effects / dependencies:**
-- The backend is expected to extract the `tt...` title ID from `imdb_url` for scraping; malformed URLs are not rejected at the model level and must be validated at the route or service layer.
-- When `aspects` is `None`, the server resolves the movie preset domain's aspect list, meaning this field has an implicit dependency on the preset domain configuration.
+- The backend is expected to extract the `tt...` title ID from `imdb_url` for scraping. Malformed or non-IMDB URLs are **not** rejected at the Pydantic model level; validation must occur at the route or service layer.
+- When `aspects` is `None`, the server resolves the movie preset domain's aspect list, creating an implicit dependency on the preset domain configuration at the service level.
 
 ---
 
-## 3. What Changed
+### Report Chat Models
 
-### Summary of the Diff
+---
 
-Two changes were made to the `IMDBReportRequest` model and its surrounding section comment:
+#### `ChatRequest`
 
-1. **Section header renamed** — `# ── IMDB Report (SSE pipeline) ──` was changed to `# ── Movie Report (SSE pipeline) ─────`.
-2. **Field description simplified** — the `imdb_url` field description was shortened from `"IMDB movie URL (must contain tt... ID)"` to `"IMDB movie URL"`.
-
-### Detailed Breakdown
-
-#### Change 1: Section Comment Rename
-
-```diff
--# ── IMDB Report (SSE pipeline) ──────────────────────────────────────────────
-+# ── Movie Report (SSE pipeline) ─────────────────────────────────────────────
+```python
+class ChatRequest(BaseModel):
+    report_id: str = Field(..., description="Report ID returned after generation")
+    question: str = Field(..., description="User question about the report")
 ```
 
-This is a cosmetic rename of the inline section heading. It aligns the comment style with a slightly more generic label ("Movie Report" vs. "IMDB Report"), consistent with how the class itself (`IMDBReportRequest`) is named from a functional rather than platform-specific perspective. No code behavior is affected.
-
-#### Change 2: `imdb_url` Field Description Update
-
-```diff
--    imdb_url: str = Field(..., description="IMDB movie URL (must contain tt... ID)")
-+    imdb_url: str = Field(..., description="IMDB movie URL")
-```
-
-The phrase `(must contain tt... ID)` was removed from the `description` string. This description is surfaced in:
-- Auto-generated OpenAPI/Swagger documentation served by FastAPI.
-- Any tooling or client that reads the JSON Schema emitted by Pydantic.
-
-**Before:** The description explicitly informed API consumers that the URL must contain a `tt`-prefixed IMDB title identifier, acting as informal inline documentation of a validation constraint.
-
-**After:** The description is simplified to a plain label. The `tt...` ID requirement is no longer communicated through the schema field description. This means:
-- API consumers reading generated docs will no longer see this constraint documented at the field level.
-- The constraint itself is not enforced at the Pydantic model level in either version (no `HttpUrl` type or regex validator is applied), so the actual validation behavior at runtime is unchanged.
-- Any enforcement of the `tt...`
+**What it does:** Request body for the report chat endpoint. Enables interactive, question-and-answer style querying of a previously generated analysis report, allowing users to ask natural-language questions about batch or IMDB pipeline results

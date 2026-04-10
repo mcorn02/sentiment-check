@@ -4,7 +4,7 @@
 
 ## 1. Module Overview
 
-`api/main.py` is the **application entrypoint** for the Aspect Sentiment API, a FastAPI-based web service providing domain-agnostic aspect-based sentiment analysis with batch processing capabilities and business report generation.
+`api/main.py` is the **application entrypoint** for the **Sentiment Check API**, a FastAPI-based web service providing AI-powered movie review sentiment analysis with aspect-level breakdowns and interactive chat capabilities.
 
 This module is responsible for:
 
@@ -16,6 +16,12 @@ This module is responsible for:
 - **Exposing a health-check endpoint** for uptime monitoring and load-balancer probes.
 
 Within the broader system architecture, this file sits at the **top of the Python package hierarchy** and is the sole module referenced by the ASGI server. It composes together database initialization (`api.db`), route handlers (`api.routes.*`), and static file serving into a single deployable unit.
+
+**How to run:**
+
+```bash
+uvicorn api.main:app --reload
+```
 
 ---
 
@@ -57,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `app` | `FastAPI` | The FastAPI application instance (injected by the framework). |
+| `app` | `FastAPI` | The FastAPI application instance (injected by the framework; not used directly in the body). |
 
 **Returns:** An async context manager (used internally by FastAPI; not called directly by user code).
 
@@ -75,32 +81,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 ```python
 app = FastAPI(
-    title="Aspect Sentiment API",
-    description="Domain-agnostic aspect-based sentiment analysis with batch processing and business reports.",
+    title="Sentiment Check API",
+    description="AI-powered movie review sentiment analysis with aspect-level breakdowns and interactive chat.",
     version="0.2.0",
     lifespan=lifespan,
 )
 ```
 
-**What it does:** The central `FastAPI` application object. This is the ASGI-callable that `uvicorn` (or any other ASGI server) references directly.
+**What it does:** The central `FastAPI` application object. This is the ASGI-callable that `uvicorn` (or any other ASGI server) references directly as `api.main:app`.
 
 **Configuration:**
 
 | Field | Value |
 |-------|-------|
-| `title` | `"Aspect Sentiment API"` — appears in auto-generated OpenAPI/Swagger docs |
-| `description` | Human-readable summary of the API's purpose |
+| `title` | `"Sentiment Check API"` — appears in auto-generated OpenAPI/Swagger docs |
+| `description` | Human-readable summary of the API's purpose; surfaced in `/docs` and `/openapi.json` |
 | `version` | `"0.2.0"` — surfaced in the OpenAPI schema |
 | `lifespan` | Bound to the `lifespan` async context manager above |
 
 **Registered middleware (applied in order of registration):**
 
-- **`CORSMiddleware`** — see below.
+- **`CORSMiddleware`** — see [CORS Middleware Configuration](#cors-middleware-configuration) below.
 
 **Mounted routers (all under `/api` prefix):**
 
-| Router | Prefix | Source |
-|--------|--------|--------|
+| Router | Prefix | Source Module |
+|--------|--------|---------------|
 | `analyze_router` | `/api` | `api.routes.analyze` |
 | `batch_router` | `/api` | `api.routes.batch` |
 | `domains_router` | `/api` | `api.routes.domains` |
@@ -138,7 +144,7 @@ app.add_middleware(
 | `allow_methods` | `["*"]` | All HTTP methods permitted |
 | `allow_headers` | `["*"]` | All request headers permitted |
 
-**Behavioral note:** In production, when the frontend is served by the same origin as the API (via the SPA static serving block below), CORS restrictions do not apply and this middleware is effectively a no-op for frontend traffic.
+**Behavioral note:** In production, when the frontend is served by the same origin as the API (via the SPA static serving block), CORS restrictions do not apply and this middleware is effectively a no-op for frontend traffic.
 
 ---
 
@@ -179,11 +185,11 @@ async def serve_spa(request: Request, full_path: str) -> FileResponse:
 
 > **Conditional registration:** This endpoint is **only registered if `FRONTEND_DIST` is a valid directory** at import time. It will not exist in a pure API/development environment without a frontend build present.
 
-**What it does:** Acts as a catch-all route to support client-side routing in the React SPA. Tries to serve an exact file match from the `dist/` directory; falls back to `index.html` for all other paths (allowing the React Router to handle routing client-side).
+**What it does:** Acts as a catch-all route to support client-side routing in the React SPA. Attempts to serve an exact file match from the `dist/` directory first; falls back to `index.html` for all other paths, allowing React Router (or equivalent) to handle routing client-side.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `request` | `Request` | The incoming FastAPI/Starlette request object (available for future use). |
+| `request` | `Request` | The incoming FastAPI/Starlette request object (available for future use; not actively read in the current implementation). |
 | `full_path` | `str` | The path segment captured by `{full_path:path}`, representing everything after the root `/`. |
 
 **Returns:** A `FileResponse`:
@@ -191,15 +197,20 @@ async def serve_spa(request: Request, full_path: str) -> FileResponse:
 - `FRONTEND_DIST / "index.html"` otherwise.
 
 **Side effects / dependencies:**
-- Performs filesystem existence checks (`Path.is_file()`) on each request for non-asset routes.
+- Performs a filesystem existence check (`Path.is_file()`) on each request for non-asset routes.
 - Only active when `frontend/dist/` is present (i.e., after `npm run build` or equivalent).
+- Because this is a catch-all (`/{full_path:path}`), it is essential that all other routes — including the `/assets` static mount and all `/api` prefixed routes — are registered **before** this handler. FastAPI/Starlette evaluates routes in registration order.
 
 ---
 
 ### Static File Mount
 
 ```python
-app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+app.mount(
+    "/assets",
+    StaticFiles(directory=FRONTEND_DIST / "assets"),
+    name="assets",
+)
 ```
 
 > **Conditional registration:** Same condition as `serve_spa` — only active when `FRONTEND_DIST` exists.
@@ -207,100 +218,54 @@ app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="asse
 **What it does:** Mounts the compiled frontend's `assets/` subdirectory (JavaScript bundles, CSS, fonts, images) at `/assets`, allowing the browser to fetch them with proper caching headers via Starlette's `StaticFiles` handler.
 
 **Notes:**
-- This mount is registered **before** the `serve_spa` catch-all route, which is important — Starlette/FastAPI evaluates routes in registration order, so `/assets/...` requests are handled by the static file server and never fall through to the SPA handler.
+- This mount is registered **before** the `serve_spa` catch-all route. Starlette/FastAPI evaluates routes in registration order, so `/assets/...` requests are handled by the static file server and never fall through to the SPA handler.
+- Static file responses include standard HTTP caching headers managed by `StaticFiles`, enabling browser-level caching of immutable build artifacts.
 
 ---
 
 ## 3. What Changed
 
-This commit represents a significant **feature expansion** from `v0.1.0` to `v0.2.0`. The changes fall into four categories:
+This commit makes a **targeted metadata update** to the `FastAPI` application instance, rebranding the API from its previous general-purpose identity to a more specifically scoped product identity.
 
 ---
 
-### 3.1 New Imports
+### 3.1 Application Title Updated
 
 ```diff
-+import os
-+from pathlib import Path
-+from fastapi import FastAPI, Request
-+from fastapi.middleware.cors import CORSMiddleware
-+from fastapi.responses import FileResponse
-+from fastapi.staticfiles import StaticFiles
-+from api.routes.report import router as report_router
+-    title="Aspect Sentiment API",
++    title="Sentiment Check API",
 ```
 
-- `os` is imported (currently unused in the visible code — likely reserved for future environment variable access or left as a minor oversight).
-- `Path` enables robust, cross-platform filesystem path manipulation.
-- `Request`, `FileResponse`, `StaticFiles`, and `CORSMiddleware` are all required by the new SPA serving and CORS features.
-- `report_router` adds a new route group (`api.routes.report`) to the application.
+**What changed:** The human-readable title of the application has been renamed from `"Aspect Sentiment API"` to `"Sentiment Check API"`.
+
+**Why it matters:** The `title` field is surfaced directly in the auto-generated OpenAPI schema and is displayed prominently in the interactive Swagger UI (`/docs`) and ReDoc (`/redoc`) interfaces. Any API client, SDK generator, or documentation tooling that reads from `/openapi.json` will now see `"Sentiment Check API"` as the API name. This is a **user-visible change** affecting developer-facing documentation.
 
 ---
 
-### 3.2 CORS Middleware Added
-
-**Before:** No CORS headers were emitted. Any browser-based request from a different origin would be rejected at the browser level.
-
-**After:** CORS is explicitly configured for four localhost origins. This is a **user-visible functional change** — the React development server can now call the API without `Access-Control-Allow-Origin` errors.
-
----
-
-### 3.3 All Routers Moved to `/api` Prefix
-
-**Before:**
-```python
-app.include_router(analyze_router)   # routes at e.g. /analyze
-app.include_router(batch_router)     # routes at e.g. /batch
-app.include_router(domains_router)   # routes at e.g. /domains
-```
-
-**After:**
-```python
-app.include_router(analyze_router, prefix="/api")  # routes at /api/analyze
-app.include_router(batch_router,   prefix="/api")  # routes at /api/batch
-app.include_router(domains_router,  prefix="/api")  # routes at /api/domains
-app.include_router(report_router,   prefix="/api")  # routes at /api/report (new)
-```
-
-**Why it matters:** Prefixing all API routes with `/api` creates a clean namespace separation between API endpoints and static frontend assets. This is **a breaking change** for any existing API consumers — all route URLs have changed.
-
----
-
-### 3.4 Health Endpoint Moved
-
-**Before:** `GET /health`
-
-**After:** `GET /api/health`
-
-This is consistent with the `/api` prefix migration and is **a breaking change** for any health-check configuration pointing to the old URL.
-
----
-
-### 3.5 `report_router` Added
-
-A new router (`api.routes.report`) is now included, adding business report generation functionality to the API. This is a net-new capability introduced in `v0.2.0`.
-
----
-
-### 3.6 Frontend SPA Serving Added
-
-**Before:** The application served no static files and had no fallback routes.
-
-**After:** When `frontend/dist/` exists on disk, the application:
-1. Mounts `/assets` as a static file directory.
-2. Registers a `/{full_path:path}` catch-all that serves real files or falls back to `index.html`.
-
-**Why it matters:** This enables **production deployment as a single process** — one `uvicorn` instance serves both the API and the React frontend, eliminating the need for a separate web server (e.g., Nginx) to serve the frontend in production.
-
----
-
-### 3.7 Version Bump
+### 3.2 Application Description Updated
 
 ```diff
--    version="0.1.0",
-+    version="0.2.0",
+-    description="Domain-agnostic aspect-based sentiment analysis with batch processing and business reports.",
++    description="AI-powered movie review sentiment analysis with aspect-level breakdowns and interactive chat.",
 ```
 
-Reflects the extent of functional changes introduced in this commit. Surfaced in the OpenAPI schema at `/docs` and `/openapi.json`.
+**What changed:** The API's description string has been updated to reflect a narrower, more focused product scope:
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| Scope | Domain-agnostic (general-purpose) | Movie reviews (domain-specific) |
+| Feature framing | Batch processing + business reports | Aspect-level breakdowns + interactive chat |
+| Positioning | Enterprise/analytical tool | AI-powered consumer product |
+
+**Why it matters:** Like the title, the description is embedded in the OpenAPI schema and rendered in the Swagger UI and ReDoc documentation pages. The change signals a deliberate **product pivot** — away from a generic, domain-agnostic sentiment analysis platform toward a specialized movie review analysis tool with conversational (chat) capabilities. This description change is **user-visible** to any developer consuming the API documentation.
+
+**Behavioral note:** The description change is purely cosmetic from a runtime perspective — it does not alter any routing logic, middleware configuration, database behavior, or response structure. However, it accurately documents a likely shift in the underlying route handler implementations (particularly the introduction or emphasis of an interactive chat feature).
+
+---
+
+### 3.3 No Structural Changes
+
+The version number (`0.2.0`), all registered routers, the CORS middleware configuration, the lifespan handler, the health endpoint, and the SPA serving logic are **unchanged** in this commit. The diff is entirely contained within the `FastAPI(...)` constructor call.
 
 ---
 
@@ -314,7 +279,7 @@ Reflects the extent of functional changes introduced in this commit. Surfaced in
 | `analyze_router` | `api.routes.analyze` | Handles single-text sentiment analysis requests |
 | `batch_router` | `api.routes.batch` | Handles batch sentiment analysis jobs |
 | `domains_router` | `api.routes.domains` | Manages domain definitions/configurations |
-| `report_router` | `api.routes.report` | Generates business-level sentiment reports (added in this commit) |
+| `report_router` | `api.routes.report` | Generates business-level sentiment reports |
 
 ### External / Third-Party Imports
 
@@ -322,28 +287,28 @@ Reflects the extent of functional changes introduced in this commit. Surfaced in
 |---------|-------|
 | `fastapi` | Core web framework — `FastAPI`, `Request` |
 | `fastapi.middleware.cors` | `CORSMiddleware` for cross-origin request handling |
-| `fastapi.responses` | `FileResponse` for serving static files |
-| `fastapi.staticfiles` | `StaticFiles` for mounting asset directories |
+| `fastapi.responses` | `FileResponse` for serving static files and the SPA fallback |
+| `fastapi.staticfiles` | `StaticFiles` for mounting the frontend assets directory |
 | `pathlib` (stdlib) | `Path` for cross-platform filesystem path resolution |
-| `contextlib` (stdlib) | `asynccontextmanager` for lifespan management |
-| `os` (stdlib) | Imported but not actively used in current code |
+| `contextlib` (stdlib) | `asynccontextmanager` for lifespan event management |
+| `os` (stdlib) | Imported but not actively used in current code; likely reserved for future environment variable access |
 
 ### What Depends on This Module
 
 | Consumer | How it uses `api/main.py` |
 |----------|--------------------------|
 | **ASGI server** (`uvicorn`) | References `api.main:app` directly as the ASGI callable. Entry command: `uvicorn api.main:app --reload` |
-| **Frontend (React SPA)** | All API calls target routes registered in this module; static serving is also configured here |
+| **Frontend (React SPA)** | All API calls target routes registered in this module; static file serving is also configured here for production deployments |
 | **Health monitoring / load balancers** | Polls `GET /api/health` |
-| **OpenAPI clients / consumers** | Schema generated from `app` instance reflects all routers and metadata defined here |
+| **OpenAPI clients / SDK generators** | Schema generated from the `app` instance reflects all routers, metadata, and titles defined here |
 
 ### Filesystem Dependencies
 
 | Path | Required | Purpose |
 |------|----------|---------|
 | `<project_root>/frontend/dist/` | Optional | Enables SPA static file serving when present |
-| `<project_root>/frontend/dist/assets/` | Optional | Mounted at `/assets` for JS/CSS bundles |
-| `<project_root>/frontend/dist/index.html` | Optional | Served as SPA fallback for unmatched routes |
+| `<project_root>/frontend/dist/assets/` | Optional | Mounted at `/assets` for JS/CSS/font bundles |
+| `<project_root>/frontend/dist/index.html` | Optional | Served as SPA fallback for all unmatched routes |
 
 ---
 
