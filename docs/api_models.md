@@ -43,15 +43,15 @@ All API route handlers depend on this module. It has **no dependencies on other 
 ```python
 class AnalysisMethod(str, Enum):
     llm = "LLM (OpenAI)"
-    nli = "Zero-shot NLI (local)"
 ```
 
-**What it does:** Enumerates the two supported sentiment analysis backends. Inherits from `str` so members serialize directly to their string values in JSON output and OpenAPI schemas.
+**What it does:** Enumerates the supported sentiment analysis backends. Inherits from `str` so members serialize directly to their string values in JSON output and OpenAPI schemas.
 
 | Member | Value | Description |
 |--------|-------|-------------|
 | `llm` | `"LLM (OpenAI)"` | Uses the OpenAI API (remote, requires API key) |
-| `nli` | `"Zero-shot NLI (local)"` | Uses a local zero-shot Natural Language Inference model; no external API required |
+
+> **Note:** This enum previously contained a second member (`nli = "Zero-shot NLI (local)"`) which has been removed. Only the `llm` backend is now supported. See [What Changed](#3-what-changed) for details.
 
 ---
 
@@ -146,6 +146,8 @@ class AnalyzeRequest(BaseModel):
 | `method` | `AnalysisMethod` | ❌ No | `AnalysisMethod.llm` | Which analysis backend to invoke |
 
 **Resolution priority (server-side):** `domain_id` (loads saved config) → `aspects` override (overrides config aspects if present) → `domain` fallback label (used when no `domain_id` is given).
+
+> **Behavioral note:** Because `AnalysisMethod.nli` has been removed, any previously submitted request payload containing `"method": "Zero-shot NLI (local)"` will now **fail Pydantic validation**. The only accepted value for `method` is `"LLM (OpenAI)"` (or equivalently, the enum default `AnalysisMethod.llm`).
 
 ---
 
@@ -361,11 +363,3 @@ class IMDBReportRequest(BaseModel):
 ---
 
 #### `ChatRequest`
-
-```python
-class ChatRequest(BaseModel):
-    report_id: str = Field(..., description="Report ID returned after generation")
-    question: str = Field(..., description="User question about the report")
-```
-
-**What it does:** Request body for the report chat endpoint. Enables interactive, question-and-answer style querying of a previously generated analysis report, allowing users to ask natural-language questions about batch or IMDB pipeline results

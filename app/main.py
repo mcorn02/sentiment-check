@@ -143,7 +143,7 @@ def main():
     )
     parser.add_argument(
         "--method",
-        choices=["LLM (OpenAI)", "Zero-shot NLI (local)"],
+        choices=["LLM (OpenAI)"],
         default="LLM (OpenAI)",
         help="Analysis method to use"
     )

@@ -1,9 +1,6 @@
 # Sentiment Check
 
-A web application that scrapes IMDB reviews for any movie and generates a structured sentiment report broken down by aspect (acting, plot, pacing, etc.), powered by two analysis methods:
-
-- **LLM (OpenAI)**: GPT-4o-mini via API — higher accuracy, costs money
-- **Zero-shot NLI (local)**: `typeform/distilbert-base-uncased-mnli` — free, offline, privacy-preserving
+An aspect-based sentiment analysis tool that supports IMDB movie review scraping and CSV upload for any industry. Generates structured sentiment reports broken down by aspect, powered by GPT-4o-mini via the OpenAI API.
 
 ## Installation
 
@@ -28,7 +25,7 @@ playwright install chromium
 cd frontend && npm install && npm run build
 ```
 
-5. Set up your OpenAI API key (required for LLM method):
+5. Set up your OpenAI API key:
 ```bash
 export OPENAI_API_KEY=your_api_key_here
 ```
@@ -37,7 +34,7 @@ Or create a `.env` file in the project root:
 OPENAI_API_KEY=your_api_key_here
 ```
 
-> **First run:** Models will be downloaded automatically (~500MB for sentence-transformers, ~1.6GB for the NLI model).
+> **First run:** The sentence-transformer model will be downloaded automatically (~500MB).
 
 ## Usage
 
@@ -91,9 +88,6 @@ python -m app.main --review "This movie had great acting but a weak plot."
 # Analyze from a file
 python -m app.main --file review.txt
 
-# Use the local NLI method instead of OpenAI
-python -m app.main --review "..." --method "Zero-shot NLI (local)"
-
 # Custom aspects
 python -m app.main --review "..." --aspects acting plot soundtrack
 
@@ -112,28 +106,21 @@ python -m app.main --dataset path/to/IMDB_Dataset.csv --test 5
 | `--dataset PATH` | Path to a local CSV dataset |
 | `--dataset-kaggle` | Download IMDB dataset from Kaggle |
 | `--aspects A B ...` | Custom aspects to analyze |
-| `--method METHOD` | `"LLM (OpenAI)"` or `"Zero-shot NLI (local)"` |
+| `--method METHOD` | `"LLM (OpenAI)"` |
 | `--test N` | Analyze first N reviews from a dataset |
-
-## Methods
-
-| | LLM (OpenAI) | Zero-shot NLI (local) |
-|--|--|--|
-| **Accuracy** | Higher | Moderate |
-| **Speed** | Fast (API) | Slower (local inference) |
-| **Cost** | Per-request API cost | Free |
-| **Privacy** | Review sent to OpenAI | Fully local |
-| **Internet** | Required | Not required |
 
 ## Default Aspects
 
 Defined in `app/config.py`:
-- `acting_performances`
-- `story_plot`
-- `pacing`
-- `visuals`
-- `directing`
-- `writing`
+- `quality`
+- `value`
+- `service`
+- `features`
+- `reliability`
+- `usability`
+
+Movie-specific aspects (`MOVIE_ASPECTS`) are used automatically by the IMDB endpoint:
+- `acting_performances`, `story_plot`, `pacing`, `visuals`, `directing`, `writing`
 
 ## Evaluation
 

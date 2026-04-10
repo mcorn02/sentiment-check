@@ -10,7 +10,7 @@
 `config.py` serves as the **centralized configuration hub** for the application. It is responsible for:
 
 - **Loading environment variables** from a `.env` file at startup (via `python-dotenv`).
-- **Defining application-wide constants** for model selection, classification thresholds, and default analytical parameters.
+- **Defining application-wide constants** for model selection and default analytical parameters.
 - **Providing secure access** to sensitive credentials (e.g., the OpenAI API key) through a guarded accessor function that fails fast with a clear error message if the key is absent.
 
 Within the system architecture, this module sits at the **foundation layer** — it has no dependencies on other internal application modules and is expected to be imported by any component that requires configuration values, model identifiers, or API credentials. Because it calls `load_dotenv()` at import time, importing this module is a side-effectful operation and should occur early in the application lifecycle.
@@ -96,42 +96,6 @@ A list of **film-specific** aspect categories retained for backward compatibilit
 
 ---
 
-#### `DEFAULT_NLI_THRESHOLD`
-
-```python
-DEFAULT_NLI_THRESHOLD: float = 0.55
-```
-
-**Description:**
-The default confidence threshold for **Natural Language Inference (NLI)**-based classification decisions. Predictions with a confidence score below this threshold may be discarded or treated as inconclusive by the consuming pipeline.
-
-| Attribute | Value |
-|---|---|
-| Type | `float` |
-| Range | `0.0` – `1.0` |
-| Default | `0.55` |
-
----
-
-#### `DEFAULT_ZSC_THRESHOLD`
-
-```python
-DEFAULT_ZSC_THRESHOLD: float = 0.6
-```
-
-**Description:**
-The default confidence threshold for **Zero-Shot Classification (ZSC)** decisions. Operates similarly to `DEFAULT_NLI_THRESHOLD` but applies specifically to the zero-shot classification pipeline.
-
-| Attribute | Value |
-|---|---|
-| Type | `float` |
-| Range | `0.0` – `1.0` |
-| Default | `0.60` |
-
-> **Note:** `DEFAULT_ZSC_THRESHOLD` is intentionally set slightly higher than `DEFAULT_NLI_THRESHOLD`, reflecting the expectation that zero-shot predictions should meet a stricter confidence bar before being acted upon.
-
----
-
 #### `SENTENCE_TRANSFORMER_MODEL`
 
 ```python
@@ -166,23 +130,6 @@ Identifier for the **Cross-Encoder** model used for re-ranking or precise releva
 | Typical Usage | Re-ranking candidate passages retrieved by a bi-encoder in a retrieval pipeline |
 
 > **Architectural note:** In a typical two-stage retrieval system, `SENTENCE_TRANSFORMER_MODEL` (bi-encoder) performs fast approximate candidate retrieval, and `CROSS_ENCODER_MODEL` then re-ranks those candidates with higher precision. The two constants are designed to work in tandem.
-
----
-
-#### `ZERO_SHOT_MODEL`
-
-```python
-ZERO_SHOT_MODEL: str = "typeform/distilbert-base-uncased-mnli"
-```
-
-**Description:**
-Identifier for the **zero-shot classification** model used to classify text into arbitrary label categories without task-specific training data. This model powers the ZSC pipeline governed by `DEFAULT_ZSC_THRESHOLD`.
-
-| Attribute | Value |
-|---|---|
-| Type | `str` |
-| Model Source | [Hugging Face — `typeform/distilbert-base-uncased-mnli`](https://huggingface.co/typeform/distilbert-base-uncased-mnli) |
-| Characteristics | DistilBERT-based, trained on MNLI; efficient for zero-shot inference |
 
 ---
 
@@ -289,64 +236,58 @@ This call executes **when the module is first imported**. It searches for a `.en
 
 ## 3. What Changed
 
-The current version of this module introduces two meaningful changes relative to the previously documented version: the **replacement of `DEFAULT_ASPECTS`** content with domain-agnostic categories, and the **addition of `MOVIE_ASPECTS`** as a legacy-designated constant.
+This commit removes two categories of constants that were previously part of the module's public API: **classification thresholds** and the **zero-shot classification model identifier**. The current state of the module reflects a narrowed, cleaner configuration surface focused solely on the models and parameters that remain actively in use.
 
-### What Was Added
+### What Was Removed
+
+#### Default Classification Thresholds
 
 ```diff
-+# General-purpose default aspects (domain-agnostic)
- DEFAULT_ASPECTS = [
--    "acting_performances",
--    "story_plot",
--    "pacing",
--    "visuals",
--    "directing",
--    "writing",
-+    "quality",
-+    "value",
-+    "service",
-+    "features",
-+    "reliability",
-+    "usability",
- ]
-
-+# Legacy movie aspects (used by IMDB endpoint)
-+MOVIE_ASPECTS = [
-+    "acting_performances",
-+    "story_plot",
-+    "pacing",
-+    "visuals",
-+    "directing",
-+    "writing",
-+]
+-# Default thresholds
+-DEFAULT_NLI_THRESHOLD = 0.55
+-DEFAULT_ZSC_THRESHOLD = 0.6
 ```
 
-### What Was Changed
+Two numeric threshold constants have been deleted:
 
-**`DEFAULT_ASPECTS` — content replaced entirely.**
-The six film-specific aspect strings (`acting_performances`, `story_plot`, `pacing`, `visuals`, `directing`, `writing`) have been replaced with six domain-agnostic strings (`quality`, `value`, `service`, `features`, `reliability`, `usability`). The constant name, type, and length are unchanged; only the string values differ.
+| Removed Constant | Former Value | Former Purpose |
+|---|---|---|
+| `DEFAULT_NLI_THRESHOLD` | `0.55` | Confidence cutoff for Natural Language Inference (NLI) classification decisions |
+| `DEFAULT_ZSC_THRESHOLD` | `0.60` | Confidence cutoff for Zero-Shot Classification (ZSC) decisions |
 
-**`MOVIE_ASPECTS` — new constant introduced.**
-The former contents of `DEFAULT_ASPECTS` have been preserved in a new constant, `MOVIE_ASPECTS`, annotated as the legacy set used specifically by the IMDB endpoint. This ensures that any existing code targeting the IMDB endpoint is not broken by the generalization of `DEFAULT_ASPECTS`, provided it is updated to reference `MOVIE_ASPECTS` explicitly.
+These constants governed the minimum confidence scores required for a classification result to be accepted as valid. Any pipeline component that imported and used these values will no longer find them in `app.config` after this change.
 
-### Why the Change Matters Functionally
+#### Zero-Shot Classification Model Identifier
 
-- **Broadened applicability:** The previous `DEFAULT_ASPECTS` values were inherently film-centric, limiting the usefulness of the application's default analysis path to media review contexts. The new values (`quality`, `value`, `service`, etc.) are meaningful across a wide range of product and service domains — e-commerce, SaaS, hospitality, and more — making the application's default behavior suitable for general-purpose review analysis without caller customization.
-- **Backward compatibility preserved:** Rather than simply overwriting the film-specific aspects and silently breaking IMDB endpoint consumers, the original values are retained under `MOVIE_ASPECTS`. Code that explicitly targeted movie-domain analysis can be updated to import `MOVIE_ASPECTS` instead of `DEFAULT_ASPECTS` without any loss of functionality.
-- **Intent made explicit via naming and comments:** The addition of inline comments (`# General-purpose default aspects (domain-agnostic)` and `# Legacy movie aspects (used by IMDB endpoint)`) makes the purpose and lifecycle status of each constant immediately clear to future maintainers without requiring them to inspect consuming code.
+```diff
+-ZERO_SHOT_MODEL = "typeform/distilbert-base-uncased-mnli"
+```
+
+The identifier for the zero-shot classification model has been removed. This model — a DistilBERT variant fine-tuned on the MNLI dataset and hosted on Hugging Face — was previously used for zero-shot text classification tasks. Its removal from the configuration implies that the zero-shot classification code path has been retired, refactored, or migrated to an alternative approach that no longer requires a dedicated model constant in this module.
+
+---
+
+### Why the Changes Matter Functionally
+
+**Removal of `DEFAULT_NLI_THRESHOLD` and `DEFAULT_ZSC_THRESHOLD`:**
+These thresholds were decision-boundary values — removing them does not merely change a label or comment, but eliminates configuration that actively influenced classification outcomes. Any consuming code that referenced these constants to gate or filter classification results must now either define its own threshold values locally, receive them as parameters, or have been removed alongside the classification logic that depended on them. If any code paths silently fall back to `None` or `0` in the absence of these values, the behavioral impact could be significant (e.g., accepting all classification results regardless of confidence, or rejecting all of them).
+
+**Removal of `ZERO_SHOT_MODEL`:**
+The zero-shot classification model identifier being removed strongly suggests that the NLI/ZSC-based classification pipeline has been deprecated or removed from the application. Previously, the co-presence of `DEFAULT_NLI_THRESHOLD`, `DEFAULT_ZSC_THRESHOLD`, and `ZERO_SHOT_MODEL` formed a coherent configuration group for a specific classification subsystem. With all three now absent, that subsystem appears to have been fully retired from the configuration layer.
+
+---
 
 ### Behavioral Differences From Before
 
 | Aspect | Before | After |
 |---|---|---|
-| `DEFAULT_ASPECTS` values | Film-specific (`acting_performances`, etc.) | Domain-agnostic (`quality`, `value`, etc.) |
-| `DEFAULT_ASPECTS` length | 6 | 6 (unchanged) |
-| `MOVIE_ASPECTS` constant | Not present | Available as `app.config.MOVIE_ASPECTS` |
-| IMDB endpoint aspect source | `DEFAULT_ASPECTS` (implicit) | Should be updated to use `MOVIE_ASPECTS` (explicit, legacy-designated) |
-| General-purpose pipelines | Would receive film-specific aspects by default | Now receive domain-agnostic aspects by default |
-| Public API surface | `DEFAULT_ASPECTS` only | Extended with `MOVIE_ASPECTS` |
+| `DEFAULT_NLI_THRESHOLD` | Available as `app.config.DEFAULT_NLI_THRESHOLD` (`0.55`) | **Removed** — `AttributeError` if accessed |
+| `DEFAULT_ZSC_THRESHOLD` | Available as `app.config.DEFAULT_ZSC_THRESHOLD` (`0.60`) | **Removed** — `AttributeError` if accessed |
+| `ZERO_SHOT_MODEL` | Available as `app.config.ZERO_SHOT_MODEL` (`"typeform/distilbert-base-uncased-mnli"`) | **Removed** — `AttributeError` if accessed |
+| NLI/ZSC classification configuration | Centrally managed in `app.config` | No longer present in the configuration layer |
+| Public API surface | 8 exported names (5 constants + 2 threshold values + 1 function) | Reduced to 6 exported names (5 constants + 1 function) |
 
-> ⚠️ **Breaking change risk:** Any consumer that imported `DEFAULT_ASPECTS` and expected to receive film-specific aspect strings will now receive the domain-agnostic set instead. Code paths serving the IMDB endpoint or other film-analysis features **must be updated** to import `MOVIE_ASPECTS` in place of `DEFAULT_ASPECTS`. This is a **breaking change** for any consumer relying on the prior string content of `DEFAULT_ASPECTS`.
+> ⚠️ **Breaking change:** Any module that imports `DEFAULT_NLI_THRESHOLD`, `DEFAULT_ZSC_THRESHOLD`, or `ZERO_SHOT_MODEL` from `app.config` will raise an `ImportError` (for direct name imports) or `AttributeError` (for attribute-style access) after this change. All consumers of these constants must be updated or removed.
 
 ---
 
@@ -371,5 +312,12 @@ Any application component that requires one or more of the following should impo
 |---|---|
 | Sentence embedding and semantic search modules | `SENTENCE_TRANSFORMER_MODEL` |
 | Re-ranking and relevance scoring modules | `CROSS_ENCODER_MODEL` |
-| Zero-shot classification wrappers | `ZERO_SHOT_MODEL`, `DEFAULT_ZSC_THRESHOLD` |
-| NLI-based
+| LLM-based analysis modules | `OPENAI_MODEL`, `OPENAI_MAX_TOKENS`, `get_openai_api_key()` |
+| Default aspect consumers (general-purpose) | `DEFAULT_ASPECTS` |
+| Legacy IMDB / film-analysis endpoints | `MOVIE_ASPECTS` |
+
+> **Note for maintainers:** Consumers that previously imported `DEFAULT_NLI_THRESHOLD`, `DEFAULT_ZSC_THRESHOLD`, or `ZERO_SHOT_MODEL` must be audited and updated. These constants no longer exist in the module and their removal indicates that the NLI/ZSC classification subsystem has been retired from the configuration layer. Verify that no active code paths reference these removed names before deploying this change.
+
+---
+
+`FUNCTIONAL_CHANGE: YES`

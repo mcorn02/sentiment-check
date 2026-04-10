@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 class AnalysisMethod(str, Enum):
     llm = "LLM (OpenAI)"
-    nli = "Zero-shot NLI (local)"
 
 
 # ── Domain config ─────────────────────────────────────────────────────────────
