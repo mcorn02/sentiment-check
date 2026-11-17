@@ -13,7 +13,7 @@ pip install -r requirements.txt
 cd frontend && npm install && npm run build && cd ..
 ```
 
-Add your LLM API key to a `.env` file in the project root (currently `OPENAI_API_KEY=...`).
+Add your Anthropic API key to a `.env` file in the project root: `ANTHROPIC_API_KEY=...`. The app uses Claude Sonnet 5.5 (`app/config.py`).
 
 > **First run:** the sentence-transformer and cross-encoder models download automatically (~500MB). NLTK tokenizers download on first use.
 

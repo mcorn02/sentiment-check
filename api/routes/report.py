@@ -15,9 +15,9 @@ from fastapi.responses import StreamingResponse
 from api.db import get_domain
 from api.models import ChatRequest
 from api.upload_parsing import UploadError, parse_upload
-from app.config import DEFAULT_ASPECTS, OPENAI_MODEL, OPENAI_MAX_TOKENS
+from app.config import DEFAULT_ASPECTS, WRITING_EFFORT
 from app.report_generator import async_generate_report, retrieve_for_aspect
-from app.sentiment_analyzer import _get_async_openai_client
+from app.llm import complete_text
 
 router = APIRouter(prefix="/report", tags=["report"])
 
@@ -215,12 +215,5 @@ Answer the user's question based on the review data above. Be specific and refer
 
 User question: {request.question}"""
 
-    client = _get_async_openai_client()
-    resp = await client.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=OPENAI_MAX_TOKENS,
-    )
-
-    return {"answer": resp.choices[0].message.content.strip()}
+    answer = await complete_text(prompt, effort=WRITING_EFFORT)
+    return {"answer": answer}

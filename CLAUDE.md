@@ -8,7 +8,7 @@ Guidance for Claude Code when working in this repository.
 
 - **Backend:** FastAPI in `api/`, analysis core in `app/`
 - **Frontend:** React 19 + TypeScript + Vite + Tailwind v4 + Recharts in `frontend/`
-- **LLM:** currently OpenAI `gpt-4o-mini` via `AsyncOpenAI` (`app/config.py`). The owner plans to switch to Claude Sonnet 5.5 **manually** — don't migrate the provider unless asked.
+- **LLM:** Claude Sonnet 5.5 (`claude-sonnet-5-5`) via the Anthropic Python SDK (`AsyncAnthropic`). Every call goes through `app/llm.py` (`complete_text` / `complete_json`). Key: `ANTHROPIC_API_KEY` in `.env`.
 - **Local models:** `all-MiniLM-L6-v2` (embeddings) + `cross-encoder/ms-marco-MiniLM-L-6-v2` (rerank), lazily loaded module globals.
 
 There is no CLI — the web app is the only interface. Python env in use: `~/.pyenv/versions/venv311`.
@@ -49,7 +49,8 @@ SSE event names and payload shapes are a contract with `frontend/src/hooks/useSS
 ## Other pieces
 
 - `api/db.py` — SQLite (`data/api.db`) holding domain presets (seeded on startup) and custom domains. `api/routes/domains.py` exposes them; the UI's domain dropdown uses it.
-- `app/config.py` — `DEFAULT_ASPECTS`, model names, `OPENAI_MAX_TOKENS`, API key loading (`.env` via dotenv).
+- `app/config.py` — `DEFAULT_ASPECTS`, model names, effort levels (`LABEL_EFFORT` for per-review labels, `WRITING_EFFORT` for narratives/summary/insights/chat); loads `.env`.
+- `app/llm.py` — the only place that talks to Claude. Structured output via `output_config.format` (JSON schema with `additionalProperties: false`), effort via `output_config.effort`, server-side refusal fallback (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). Raises `LLMRefusal` on refusal and errors on `max_tokens` truncation.
 - `app/preprocessing.py` — HTML/whitespace cleanup + NLTK sentence splitting for the corpus.
 - `inference/` + `evaluation/` — offline accuracy check against a hand-labelled gold set (data files are gitignored). Use this to compare models/prompts before and after changes.
 
@@ -57,16 +58,16 @@ SSE event names and payload shapes are a contract with `frontend/src/hooks/useSS
 
 1. **Per-review labeling is outdated — rework it.** Current issues in `sentiment_analyzer.py`:
    - Only positive / negative / not_mentioned; no mixed/neutral, no confidence, no evidence quote per label.
-   - JSON is parsed by stripping code fences; should use structured output / tool calling.
-   - On API failure a review silently becomes `not_mentioned` for every aspect, skewing distributions — failures should be counted and surfaced.
-   - `OPENAI_MAX_TOKENS = 350` can truncate the JSON when many aspects are requested.
+   - On API failure a single review silently becomes `not_mentioned` for every aspect, skewing distributions — partial failures should be counted and surfaced (a run where *every* review fails already raises).
+   - (Done in the Claude migration: structured output replaced code-fence JSON parsing; the 350-token cap is gone.)
 2. **Aspect selection: keep user-picked aspects up front, plus have the model suggest/review aspects** from a sample of the reviews, so themes the user didn't anticipate get surfaced. (Domain presets may become less central once this exists.)
 3. **Summaries and insights are thin.** The overall summary and insights only see percentage tables, not review text. With a stronger long-context model, feed the reviews (or a large sample) directly; this may let the local embedding/rerank models (and the `sentence-transformers`/`torch` deps) be dropped.
-4. Model switch to Sonnet 5.5 (owner doing it manually). That will need the `anthropic` package re-added to `requirements.txt` and the client getters in `sentiment_analyzer.py` replaced; the eval scripts give a before/after F1 comparison.
+4. Re-run the gold-set eval on Sonnet 5.5 (`inference/` → `evaluation/`) and compare with the gpt-4o-mini `predictions.csv` baseline; tune `LABEL_EFFORT` if needed.
 
 ## Gotchas
 
 - Run Python from the project root (imports are `api.*` / `app.*`).
 - `numpy<2.0` is pinned for the installed torch.
+- Sonnet 5.5 rejects non-default `temperature`, `thinking: {type: "disabled"}`, assistant prefill, and forced `tool_choice` — don't add them. Thinking is adaptive; tune with effort. `max_tokens` includes thinking, so keep it generous.
 - pandas here may use the dedicated string dtype — check text columns with `pd.api.types.is_string_dtype`, not `dtype == object`.
 - The Claude Code local settings (`.claude/`) are gitignored; this file is tracked.

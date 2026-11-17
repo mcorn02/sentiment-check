@@ -13,16 +13,15 @@ from sentence_transformers import CrossEncoder, util
 from .config import (
     CROSS_ENCODER_MODEL,
     DEFAULT_ASPECTS,
-    OPENAI_MODEL,
-    OPENAI_MAX_TOKENS,
+    WRITING_EFFORT,
 )
 from .preprocessing import clean_text, get_sentences
 from .sentiment_analyzer import (
     _get_sentence_model,
-    _get_async_openai_client,
     async_analyze_batch,
 )
 from .insights_agent import async_generate_insights
+from .llm import complete_text
 
 _reranker_model = None
 
@@ -132,8 +131,6 @@ async def async_generate_aspect_section(
     distribution: dict,
 ) -> str:
     """Write a 2-4 sentence narrative for one aspect, grounded in retrieved quotes."""
-    client = _get_async_openai_client()
-
     pos_pct = distribution["positive"]["pct"]
     neg_pct = distribution["negative"]["pct"]
     nm_pct = distribution["not_mentioned"]["pct"]
@@ -157,13 +154,7 @@ Write a concise 2-4 sentence summary of what reviewers praised and criticized
 about "{aspect}". Reference specific quotes. Do not invent details beyond the
 provided quotes. Start directly with the findings — no preamble."""
 
-    resp = await client.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=OPENAI_MAX_TOKENS,
-    )
-    return resp.choices[0].message.content.strip()
+    return await complete_text(prompt, effort=WRITING_EFFORT)
 
 
 async def async_generate_report(
@@ -254,8 +245,6 @@ async def async_generate_report(
 
     # Step 4: Overall summary
     _emit("stage", {"stage": "generating", "message": "Writing overall summary..."})
-    client = _get_async_openai_client()
-
     summary_lines = []
     for ar in aspect_reports:
         d = ar["distribution"]
@@ -273,13 +262,7 @@ Aspect-level sentiment breakdown:
 Write a concise 2-3 sentence overall summary highlighting what is working well
 and what needs improvement. Be direct and specific."""
 
-    resp = await client.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=[{"role": "user", "content": summary_prompt}],
-        temperature=0.3,
-        max_tokens=200,
-    )
-    overall_summary = resp.choices[0].message.content.strip()
+    overall_summary = await complete_text(summary_prompt, effort=WRITING_EFFORT)
 
     # Step 5: Insights
     _emit("stage", {"stage": "generating", "message": "Generating insights..."})

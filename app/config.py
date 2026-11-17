@@ -2,7 +2,6 @@
 Configuration management and API key loading.
 """
 # fmt: skip
-import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if it exists
@@ -21,25 +20,9 @@ DEFAULT_ASPECTS = [
 # Model configuration
 SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2"
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-OPENAI_MODEL = "gpt-4o-mini"
-OPENAI_MAX_TOKENS = 350
 
-
-def get_openai_api_key():
-    """
-    Get OpenAI API key from environment variable or .env file.
-    
-    Returns:
-        str: OpenAI API key
-        
-    Raises:
-        ValueError: If API key is not found
-    """
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "OpenAI API key not found. Please set OPENAI_API_KEY environment variable "
-            "or add it to a .env file in the project root."
-        )
-    return api_key
-
+# Claude (API key read from ANTHROPIC_API_KEY, loaded from .env above)
+CLAUDE_MODEL = "claude-sonnet-5-5"
+# Effort per task type. "low" suits classification; report writing gets a bit more.
+LABEL_EFFORT = "low"
+WRITING_EFFORT = "medium"
