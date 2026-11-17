@@ -38,7 +38,6 @@ export interface ReportData {
   overall_summary: string;
   title: string;
   /** @deprecated Use title instead */
-  movie_title?: string;
   n_reviews: number;
   aspects: AspectReport[];
 }
@@ -52,7 +51,6 @@ export interface StageEvent {
   total?: number;
   title?: string;
   /** @deprecated Use title instead */
-  movie_title?: string;
 }
 
 export interface DomainConfig {

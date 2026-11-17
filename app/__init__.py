@@ -1,5 +1,3 @@
 """
-Product Reviewer - A Python project for reviewing products.
+Sentiment Check — aspect-based sentiment analysis core.
 """
-
-__version__ = "0.1.0"

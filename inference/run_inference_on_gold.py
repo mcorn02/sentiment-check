@@ -4,8 +4,10 @@ from pathlib import Path
 # Add project root to path so we can import from app
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import asyncio
+
 import pandas as pd
-from app.sentiment_analyzer import llm_aspect_sentiment
+from app.sentiment_analyzer import async_llm_aspect_sentiment
 from app.config import DEFAULT_ASPECTS
 
 df = pd.read_csv('data/gold_dataset_aspect_level - gold_dataset_aspect_level.csv')
@@ -27,7 +29,7 @@ for i, (review_id, group) in enumerate(grouped):
         print(f"Saved predictions for {i} reviews...")
 
     try:
-        llm_results = results_to_dict(llm_aspect_sentiment(review_text, aspects))
+        llm_results = results_to_dict(asyncio.run(async_llm_aspect_sentiment(review_text, aspects)))
     except Exception as e:
         print(f"Error in LLM inference for review {review_id}: {e}")
         llm_results = {aspect: "error" for aspect in aspects}

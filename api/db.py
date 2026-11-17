@@ -1,5 +1,5 @@
 """
-SQLite setup for job state and domain configs.
+SQLite storage for domain configs (aspect presets + custom domains).
 """
 import json
 import sqlite3
@@ -26,20 +26,8 @@ def init_db() -> None:
                 is_preset   INTEGER NOT NULL DEFAULT 0
             );
 
-            CREATE TABLE IF NOT EXISTS jobs (
-                id           TEXT PRIMARY KEY,
-                status       TEXT NOT NULL DEFAULT 'queued',
-                domain       TEXT NOT NULL,
-                method       TEXT NOT NULL,
-                aspects      TEXT NOT NULL,  -- JSON array
-                total        INTEGER,
-                completed    INTEGER NOT NULL DEFAULT 0,
-                predictions  TEXT,           -- JSON array when done
-                report       TEXT,           -- JSON object when done
-                error        TEXT,
-                created_at   TEXT NOT NULL,
-                completed_at TEXT
-            );
+            -- Legacy table from the removed batch-job API.
+            DROP TABLE IF EXISTS jobs;
         """)
         _seed_presets(conn)
 
@@ -138,55 +126,3 @@ def _row_to_domain(row: sqlite3.Row) -> dict:
     d["is_preset"] = bool(d["is_preset"])
     return d
 
-
-# ── Job helpers ───────────────────────────────────────────────────────────────
-
-def insert_job(job_id: str, domain: str, method: str, aspects: list[str], total: int, created_at: str) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO jobs (id, status, domain, method, aspects, total, created_at)
-            VALUES (?, 'queued', ?, ?, ?, ?, ?)
-            """,
-            (job_id, domain, method, json.dumps(aspects), total, created_at),
-        )
-
-
-def update_job_progress(job_id: str, completed: int) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE jobs SET status='running', completed=? WHERE id=?",
-            (completed, job_id),
-        )
-
-
-def complete_job(job_id: str, predictions: list, report: dict, completed_at: str) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            """
-            UPDATE jobs
-            SET status='done', predictions=?, report=?, completed_at=?, completed=total
-            WHERE id=?
-            """,
-            (json.dumps(predictions), json.dumps(report), completed_at, job_id),
-        )
-
-
-def fail_job(job_id: str, error: str, completed_at: str) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE jobs SET status='failed', error=?, completed_at=? WHERE id=?",
-            (error, completed_at, job_id),
-        )
-
-
-def get_job(job_id: str) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-    if row is None:
-        return None
-    d = dict(row)
-    for col in ("aspects", "predictions", "report"):
-        if d[col] is not None:
-            d[col] = json.loads(d[col])
-    return d
