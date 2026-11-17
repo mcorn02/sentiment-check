@@ -39,6 +39,8 @@ async def async_llm_aspect_sentiment(
     review: str,
     aspects: list = None,
     domain: str = "product",
+    model: str | None = None,
+    effort: str | None = None,
 ) -> list[dict]:
     """
     Classify each aspect of one review as positive / negative / not_mentioned.
@@ -60,7 +62,9 @@ Aspects: {", ".join(aspects)}
 {review}
 </review>"""
 
-    labels = await complete_json(prompt, _label_schema(aspects), effort=LABEL_EFFORT, max_tokens=2000)
+    labels = await complete_json(
+        prompt, _label_schema(aspects), effort=effort or LABEL_EFFORT, max_tokens=2000, model=model
+    )
     return [{"aspect": a, "sentiment": labels[a]} for a in aspects]
 
 

@@ -2,6 +2,8 @@
 Configuration management and API key loading.
 """
 # fmt: skip
+import os
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file if it exists
@@ -22,7 +24,7 @@ SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2"
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # Claude (API key read from ANTHROPIC_API_KEY, loaded from .env above)
-CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")  # env override for A/B tests
 # Effort per task type. "low" suits classification; report writing gets a bit more.
 LABEL_EFFORT = "low"
 WRITING_EFFORT = "medium"

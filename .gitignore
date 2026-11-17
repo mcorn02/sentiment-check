@@ -139,3 +139,4 @@ data/gold_dataset_aspect_level*
 node_modules/
 frontend/dist/
 frontend/node_modules/
+predictions/
