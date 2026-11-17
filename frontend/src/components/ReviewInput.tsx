@@ -1,12 +1,16 @@
 import { useState, useRef } from 'react';
-import { Upload, Loader2, Plus, X, Link, FileText } from 'lucide-react';
+import { Upload, Loader2, Plus, X } from 'lucide-react';
 import { useDomains } from '../hooks/useDomains';
 
-type InputMode = 'csv' | 'url';
+const ACCEPTED_EXTENSIONS = ['.csv', '.tsv', '.xlsx', '.json', '.jsonl', '.ndjson', '.txt'];
+
+function isAccepted(name: string) {
+  const lower = name.toLowerCase();
+  return ACCEPTED_EXTENSIONS.some(ext => lower.endsWith(ext));
+}
 
 interface ReviewInputProps {
-  onSubmitCSV: (file: File, domainId: string, aspects: string[]) => void;
-  onSubmitURL: (url: string, domainId: string, aspects: string[]) => void;
+  onSubmit: (file: File, domainId: string, aspects: string[], reviewColumn?: string) => void;
   isLoading: boolean;
 }
 
@@ -14,11 +18,11 @@ function formatAspect(aspect: string) {
   return aspect.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export function ReviewInput({ onSubmitCSV, onSubmitURL, isLoading }: ReviewInputProps) {
+export function ReviewInput({ onSubmit, isLoading }: ReviewInputProps) {
   const { domains, isLoading: domainsLoading } = useDomains();
-  const [mode, setMode] = useState<InputMode>('url');
   const [file, setFile] = useState<File | null>(null);
-  const [url, setUrl] = useState('');
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [reviewColumn, setReviewColumn] = useState('');
   const [selectedDomainId, setSelectedDomainId] = useState('general');
   const [selectedAspects, setSelectedAspects] = useState<string[]>([]);
   const [customAspect, setCustomAspect] = useState('');
@@ -62,30 +66,34 @@ export function ReviewInput({ onSubmitCSV, onSubmitURL, isLoading }: ReviewInput
     e.preventDefault();
     setIsDragOver(false);
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.name.endsWith('.csv')) {
-      setFile(droppedFile);
-    }
+    if (droppedFile) chooseFile(droppedFile);
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.target.files?.[0];
-    if (selected) setFile(selected);
+    if (selected) chooseFile(selected);
+  }
+
+  function chooseFile(f: File) {
+    if (isAccepted(f.name)) {
+      setFile(f);
+      setFileError(null);
+    } else {
+      setFile(null);
+      setFileError(`Unsupported file type. Use ${ACCEPTED_EXTENSIONS.join(', ')}`);
+    }
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (isLoading || selectedAspects.length === 0) return;
 
-    if (mode === 'csv' && file) {
-      onSubmitCSV(file, selectedDomainId, selectedAspects);
-    } else if (mode === 'url' && url.trim()) {
-      onSubmitURL(url.trim(), selectedDomainId, selectedAspects);
+    if (file) {
+      onSubmit(file, selectedDomainId, selectedAspects, reviewColumn);
     }
   }
 
-  const canSubmit = mode === 'csv'
-    ? file && selectedAspects.length > 0
-    : url.trim() && selectedAspects.length > 0;
+  const canSubmit = file && selectedAspects.length > 0;
 
   const selectedDomain = domains.find(d => d.id === selectedDomainId);
   const domainAspects = selectedDomain?.aspects ?? [];
@@ -93,57 +101,8 @@ export function ReviewInput({ onSubmitCSV, onSubmitURL, isLoading }: ReviewInput
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Mode Tabs */}
-      <div className="flex gap-1 p-1 bg-gray-800 rounded-lg">
-        <button
-          type="button"
-          onClick={() => setMode('url')}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            mode === 'url'
-              ? 'bg-gray-700 text-white'
-              : 'text-gray-400 hover:text-gray-300'
-          }`}
-        >
-          <Link className="w-4 h-4" />
-          Review URL
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('csv')}
-          className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            mode === 'csv'
-              ? 'bg-gray-700 text-white'
-              : 'text-gray-400 hover:text-gray-300'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          Upload CSV
-        </button>
-      </div>
-
-      {/* URL Input */}
-      {mode === 'url' && (
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1.5">
-            Review Page URL
-          </label>
-          <input
-            type="url"
-            value={url}
-            onChange={e => setUrl(e.target.value)}
-            placeholder="Paste a Google Maps, Yelp, or IMDB URL..."
-            disabled={isLoading}
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-          <p className="text-xs text-gray-500 mt-1.5">
-            Supported: Google Maps business pages, Yelp business pages, IMDB movie pages
-          </p>
-        </div>
-      )}
-
       {/* File Drop Zone */}
-      {mode === 'csv' && (
-        <div>
+      <div>
           <label className="block text-sm font-medium text-gray-300 mb-1.5">
             Upload Reviews
           </label>
@@ -163,7 +122,7 @@ export function ReviewInput({ onSubmitCSV, onSubmitURL, isLoading }: ReviewInput
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept={ACCEPTED_EXTENSIONS.join(',')}
               onChange={handleFileSelect}
               className="hidden"
               disabled={isLoading}
@@ -183,16 +142,24 @@ export function ReviewInput({ onSubmitCSV, onSubmitURL, isLoading }: ReviewInput
             ) : (
               <>
                 <p className="text-sm text-gray-400">
-                  Drop a CSV file here, or click to browse
+                  Drop a file of reviews here, or click to browse
                 </p>
                 <p className="text-xs text-gray-600 mt-1">
-                  CSV should contain a column with review text
+                  CSV, TSV, Excel (.xlsx), JSON / JSONL, or plain text (one review per line or paragraph)
                 </p>
               </>
             )}
           </div>
-        </div>
-      )}
+          {fileError && <p className="text-xs text-red-400 mt-1.5">{fileError}</p>}
+          <input
+            type="text"
+            value={reviewColumn}
+            onChange={e => setReviewColumn(e.target.value)}
+            placeholder="Review column / JSON key (optional — auto-detected)"
+            disabled={isLoading}
+            className="w-full mt-2 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
+      </div>
 
       {/* Domain Selector */}
       <div>

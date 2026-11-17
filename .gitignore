@@ -6,11 +6,8 @@ __pycache__/
 # C extensions
 *.so
 
-# Claude 
-CLAUDE.md
+# Claude Code local settings (CLAUDE.md itself is tracked)
 .claude/
-agents/
-skills/
 
 # Cursor
 .cursor/
@@ -133,13 +130,10 @@ dmypy.json
 .pyre/
 
 # Generated data files
-movie_details.json
+.DS_Store
 predictions.csv
 data/api.db
 data/gold_dataset_aspect_level*
-
-# Planning documents
-FEATURE_PLAN.md
 
 # Frontend
 node_modules/

@@ -1,4 +1,4 @@
-import { Check, Loader2, Search, BarChart3, FileText } from 'lucide-react';
+import { Check, Loader2, FileUp, BarChart3, FileText } from 'lucide-react';
 import type { PipelineStage } from '../types/report';
 
 interface ProgressStepperProps {
@@ -9,13 +9,13 @@ interface ProgressStepperProps {
 }
 
 const steps = [
-  { key: 'scraping' as const, label: 'Scraping Reviews', icon: Search },
+  { key: 'parsing' as const, label: 'Reading Reviews', icon: FileUp },
   { key: 'analyzing' as const, label: 'Analyzing Sentiment', icon: BarChart3 },
   { key: 'generating' as const, label: 'Generating Report', icon: FileText },
 ];
 
 const stageOrder: Record<string, number> = {
-  scraping: 0,
+  parsing: 0,
   analyzing: 1,
   generating: 2,
   done: 3,

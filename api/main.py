@@ -4,7 +4,6 @@ FastAPI application entrypoint.
 Run with:
     uvicorn api.main:app --reload
 """
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,11 +13,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.db import init_db
-from api.routes.analyze import router as analyze_router
-from api.routes.batch import router as batch_router
 from api.routes.domains import router as domains_router
 from api.routes.report import router as report_router
-from api.routes.research import router as research_router
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
@@ -31,7 +27,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Sentiment Check API",
-    description="AI-powered movie review sentiment analysis with aspect-level breakdowns and interactive chat.",
+    description="Aspect-based sentiment analysis over uploaded reviews, with streamed reports and Q&A chat.",
     version="0.2.0",
     lifespan=lifespan,
 )
@@ -51,11 +47,8 @@ app.add_middleware(
 )
 
 # API routes under /api prefix
-app.include_router(analyze_router, prefix="/api")
-app.include_router(batch_router, prefix="/api")
 app.include_router(domains_router, prefix="/api")
 app.include_router(report_router, prefix="/api")
-app.include_router(research_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["meta"])

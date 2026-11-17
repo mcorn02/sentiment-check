@@ -88,7 +88,7 @@ export function useSSE() {
           stageMessage: stageData.message || prev.stageMessage,
           progress: stageData.progress ?? prev.progress,
           total: stageData.total ?? prev.total,
-          title: stageData.title || stageData.movie_title || prev.title,
+          title: stageData.title || prev.title,
         }));
         break;
       }
@@ -110,10 +110,6 @@ export function useSSE() {
       }
       case 'report': {
         const report = data as unknown as ReportData;
-        // Normalize: prefer title, fall back to movie_title for IMDB compat
-        if (!report.title && report.movie_title) {
-          report.title = report.movie_title;
-        }
         setState(prev => ({
           ...prev,
           report,
@@ -156,7 +152,12 @@ export function useSSE() {
     }
   }
 
-  const startCSVReport = useCallback(async (file: File, domainId: string, aspects: string[]) => {
+  const startUploadReport = useCallback(async (
+    file: File,
+    domainId: string,
+    aspects: string[],
+    reviewColumn?: string,
+  ) => {
     if (abortRef.current) abortRef.current.abort();
     setState(initialState);
     setIsRunning(true);
@@ -169,8 +170,9 @@ export function useSSE() {
       formData.append('file', file);
       if (domainId) formData.append('domain_id', domainId);
       if (aspects.length > 0) formData.append('aspects', aspects.join(','));
+      if (reviewColumn?.trim()) formData.append('review_column', reviewColumn.trim());
 
-      const response = await fetch('/api/report/csv', {
+      const response = await fetch('/api/report/upload', {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -192,81 +194,8 @@ export function useSSE() {
     } finally {
       setIsRunning(false);
     }
-  }, []);
-
-  const startIMDBReport = useCallback(async (imdbUrl: string, aspects?: string[]) => {
-    if (abortRef.current) abortRef.current.abort();
-    setState(initialState);
-    setIsRunning(true);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const body: Record<string, unknown> = { imdb_url: imdbUrl };
-      if (aspects && aspects.length > 0) body.aspects = aspects;
-
-      const response = await fetch('/api/report/imdb', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => null);
-        throw new Error(errData?.detail || `HTTP ${response.status}`);
-      }
-
-      await consumeSSE(response);
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setState(prev => ({
-        ...prev,
-        stage: 'error',
-        error: err instanceof Error ? err.message : 'Unknown error',
-      }));
-    } finally {
-      setIsRunning(false);
-    }
-  }, []);
-
-  const startURLReport = useCallback(async (url: string, domainId: string, aspects: string[]) => {
-    if (abortRef.current) abortRef.current.abort();
-    setState(initialState);
-    setIsRunning(true);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const body: Record<string, unknown> = { url };
-      if (domainId) body.domain_id = domainId;
-      if (aspects.length > 0) body.aspects = aspects;
-
-      const response = await fetch('/api/report/url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => null);
-        throw new Error(errData?.detail || `HTTP ${response.status}`);
-      }
-
-      await consumeSSE(response);
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setState(prev => ({
-        ...prev,
-        stage: 'error',
-        error: err instanceof Error ? err.message : 'Unknown error',
-      }));
-    } finally {
-      setIsRunning(false);
-    }
+    // consumeSSE only touches stable state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cancel = useCallback(() => {
@@ -274,5 +203,5 @@ export function useSSE() {
     setIsRunning(false);
   }, []);
 
-  return { ...state, isRunning, startCSVReport, startIMDBReport, startURLReport, cancel, reset };
+  return { ...state, isRunning, startUploadReport, cancel, reset };
 }

@@ -18,16 +18,6 @@ DEFAULT_ASPECTS = [
     "usability",
 ]
 
-# Legacy movie aspects (used by IMDB endpoint)
-MOVIE_ASPECTS = [
-    "acting_performances",
-    "story_plot",
-    "pacing",
-    "visuals",
-    "directing",
-    "writing",
-]
-
 # Model configuration
 SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2"
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
