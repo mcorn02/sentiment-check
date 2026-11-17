@@ -42,7 +42,7 @@ export interface ReportData {
   aspects: AspectReport[];
 }
 
-export type PipelineStage = 'idle' | 'parsing' | 'scraping' | 'analyzing' | 'generating' | 'done' | 'error';
+export type PipelineStage = 'idle' | 'parsing' | 'analyzing' | 'generating' | 'done' | 'error';
 
 export interface StageEvent {
   stage: PipelineStage;

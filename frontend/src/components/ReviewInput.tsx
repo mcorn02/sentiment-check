@@ -2,8 +2,15 @@ import { useState, useRef } from 'react';
 import { Upload, Loader2, Plus, X } from 'lucide-react';
 import { useDomains } from '../hooks/useDomains';
 
+const ACCEPTED_EXTENSIONS = ['.csv', '.tsv', '.xlsx', '.json', '.jsonl', '.ndjson', '.txt'];
+
+function isAccepted(name: string) {
+  const lower = name.toLowerCase();
+  return ACCEPTED_EXTENSIONS.some(ext => lower.endsWith(ext));
+}
+
 interface ReviewInputProps {
-  onSubmitCSV: (file: File, domainId: string, aspects: string[]) => void;
+  onSubmit: (file: File, domainId: string, aspects: string[], reviewColumn?: string) => void;
   isLoading: boolean;
 }
 
@@ -11,9 +18,11 @@ function formatAspect(aspect: string) {
   return aspect.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export function ReviewInput({ onSubmitCSV, isLoading }: ReviewInputProps) {
+export function ReviewInput({ onSubmit, isLoading }: ReviewInputProps) {
   const { domains, isLoading: domainsLoading } = useDomains();
   const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [reviewColumn, setReviewColumn] = useState('');
   const [selectedDomainId, setSelectedDomainId] = useState('general');
   const [selectedAspects, setSelectedAspects] = useState<string[]>([]);
   const [customAspect, setCustomAspect] = useState('');
@@ -57,14 +66,22 @@ export function ReviewInput({ onSubmitCSV, isLoading }: ReviewInputProps) {
     e.preventDefault();
     setIsDragOver(false);
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.name.endsWith('.csv')) {
-      setFile(droppedFile);
-    }
+    if (droppedFile) chooseFile(droppedFile);
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.target.files?.[0];
-    if (selected) setFile(selected);
+    if (selected) chooseFile(selected);
+  }
+
+  function chooseFile(f: File) {
+    if (isAccepted(f.name)) {
+      setFile(f);
+      setFileError(null);
+    } else {
+      setFile(null);
+      setFileError(`Unsupported file type. Use ${ACCEPTED_EXTENSIONS.join(', ')}`);
+    }
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -72,7 +89,7 @@ export function ReviewInput({ onSubmitCSV, isLoading }: ReviewInputProps) {
     if (isLoading || selectedAspects.length === 0) return;
 
     if (file) {
-      onSubmitCSV(file, selectedDomainId, selectedAspects);
+      onSubmit(file, selectedDomainId, selectedAspects, reviewColumn);
     }
   }
 
@@ -105,7 +122,7 @@ export function ReviewInput({ onSubmitCSV, isLoading }: ReviewInputProps) {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
+              accept={ACCEPTED_EXTENSIONS.join(',')}
               onChange={handleFileSelect}
               className="hidden"
               disabled={isLoading}
@@ -125,14 +142,23 @@ export function ReviewInput({ onSubmitCSV, isLoading }: ReviewInputProps) {
             ) : (
               <>
                 <p className="text-sm text-gray-400">
-                  Drop a CSV file here, or click to browse
+                  Drop a file of reviews here, or click to browse
                 </p>
                 <p className="text-xs text-gray-600 mt-1">
-                  CSV should contain a column with review text
+                  CSV, TSV, Excel (.xlsx), JSON / JSONL, or plain text (one review per line or paragraph)
                 </p>
               </>
             )}
           </div>
+          {fileError && <p className="text-xs text-red-400 mt-1.5">{fileError}</p>}
+          <input
+            type="text"
+            value={reviewColumn}
+            onChange={e => setReviewColumn(e.target.value)}
+            placeholder="Review column / JSON key (optional — auto-detected)"
+            disabled={isLoading}
+            className="w-full mt-2 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
       </div>
 
       {/* Domain Selector */}

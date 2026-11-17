@@ -35,7 +35,7 @@ export function ReportPage() {
         {/* Input Form */}
         <Card>
           <CardBody>
-            <ReviewInput onSubmitCSV={sse.startCSVReport} isLoading={sse.isRunning} />
+            <ReviewInput onSubmit={sse.startUploadReport} isLoading={sse.isRunning} />
           </CardBody>
         </Card>
 

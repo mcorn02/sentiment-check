@@ -5,6 +5,8 @@ Builds an embedding index of all review sentences, retrieves the most relevant
 snippets per aspect, and uses an LLM to produce a grounded narrative report.
 """
 import asyncio
+from typing import Callable
+
 import numpy as np
 from sentence_transformers import CrossEncoder, util
 
@@ -167,61 +169,68 @@ provided quotes. Start directly with the findings — no preamble."""
 async def async_generate_report(
     reviews: list[str],
     aspects: list[str] | None = None,
-    on_stage: callable = None,
+    emit: Callable[[str, dict], None] | None = None,
     domain: str = "product",
-) -> dict:
+) -> tuple[dict, dict]:
     """
-    Async end-to-end report generation with streaming callbacks.
+    Async end-to-end report generation with streaming progress.
 
     Args:
         reviews: List of review texts
         aspects: Aspects to analyze (defaults to DEFAULT_ASPECTS)
-        on_stage: Optional async callback(stage, data) for progress updates
+        emit: Optional sync callback(event, data) for progress updates.
+              Events: "stage", "aspect_complete", "insights".
         domain: Domain label for LLM context (e.g. "restaurant", "software")
 
     Returns:
-        dict with n_reviews, aspects (list of aspect reports), overall_summary
+        (report, corpus) — report has n_reviews, aspects, overall_summary,
+        insights; corpus is the embedding index, returned so callers (chat)
+        can reuse it instead of re-embedding every review.
     """
     if not aspects:
         aspects = DEFAULT_ASPECTS
 
-    async def _notify(stage, data=None):
-        if on_stage:
-            await on_stage(stage, data)
+    def _emit(event: str, data: dict) -> None:
+        if emit:
+            emit(event, data)
 
-    # Step 1: Concurrent sentiment analysis
-    await _notify("analyzing", {"progress": 0, "total": len(reviews)})
+    total = len(reviews)
 
-    def _on_analysis_progress(completed, total):
-        # Can't await in a sync callback, so we skip SSE updates here.
-        # The caller gets the final result.
-        pass
+    # Step 1: Concurrent sentiment analysis, with per-review progress.
+    # Throttle to ~100 updates max so large uploads don't flood the stream.
+    step = max(1, total // 100)
 
+    def _on_analysis_progress(completed: int, total_: int) -> None:
+        if completed == total_ or completed % step == 0:
+            _emit("stage", {
+                "stage": "analyzing",
+                "message": f"Analyzing sentiment... ({completed}/{total_})",
+                "progress": completed,
+                "total": total_,
+            })
+
+    _on_analysis_progress(0, total)
     all_results = await async_analyze_batch(
         reviews, aspects, domain=domain, on_progress=_on_analysis_progress,
     )
 
-    await _notify("analyzing", {"progress": len(reviews), "total": len(reviews)})
-
-    # Step 2: Build RAG corpus (CPU-bound, fast enough sync)
-    await _notify("generating", {"message": "Building embedding index..."})
-    corpus = build_corpus(reviews)
+    # Step 2: Build RAG corpus (CPU-bound — keep it off the event loop)
+    _emit("stage", {"stage": "generating", "message": "Building embedding index..."})
+    corpus = await asyncio.to_thread(build_corpus, reviews)
 
     # Step 3: Per-aspect retrieval + narrative (concurrent LLM calls)
-    await _notify("generating", {"message": "Generating aspect narratives..."})
+    _emit("stage", {"stage": "generating", "message": "Generating aspect narratives..."})
 
     aspect_data = []
     for aspect in aspects:
-        aspect_sentiments = []
-        for review_results in all_results:
-            for r in review_results:
-                if r["aspect"] == aspect:
-                    aspect_sentiments.append(r)
+        aspect_sentiments = [
+            r for review_results in all_results for r in review_results
+            if r.get("aspect") == aspect
+        ]
         distribution = _compute_distribution(aspect_sentiments)
-        retrieved = retrieve_for_aspect(aspect, corpus, k=10)
+        retrieved = await asyncio.to_thread(retrieve_for_aspect, aspect, corpus, 10)
         aspect_data.append((aspect, retrieved, distribution))
 
-    # Generate all aspect sections concurrently
     narratives = await asyncio.gather(
         *[
             async_generate_aspect_section(aspect, retrieved, distribution)
@@ -230,21 +239,21 @@ async def async_generate_report(
     )
 
     aspect_reports = []
-    for i, (aspect, retrieved, distribution) in enumerate(aspect_data):
+    for (aspect, retrieved, distribution), narrative in zip(aspect_data, narratives):
         report_entry = {
             "name": aspect,
             "distribution": distribution,
-            "narrative": narratives[i],
+            "narrative": narrative,
             "top_quotes": [
                 {"sentence": r["sentence"], "review": r["review_idx"] + 1}
                 for r in retrieved[:5]
             ],
         }
         aspect_reports.append(report_entry)
-        await _notify("aspect_complete", report_entry)
+        _emit("aspect_complete", report_entry)
 
     # Step 4: Overall summary
-    await _notify("generating", {"message": "Writing overall summary..."})
+    _emit("stage", {"stage": "generating", "message": "Writing overall summary..."})
     client = _get_async_openai_client()
 
     summary_lines = []
@@ -256,7 +265,7 @@ async def async_generate_report(
             f'{d["not_mentioned"]["pct"]}% not mentioned'
         )
 
-    summary_prompt = f"""You are summarizing a review analysis report across {len(reviews)} reviews.
+    summary_prompt = f"""You are summarizing a review analysis report across {total} reviews.
 
 Aspect-level sentiment breakdown:
 {chr(10).join(summary_lines)}
@@ -270,13 +279,12 @@ and what needs improvement. Be direct and specific."""
         temperature=0.3,
         max_tokens=200,
     )
-
     overall_summary = resp.choices[0].message.content.strip()
 
-    # Step 5: Generate insights
-    await _notify("generating", {"message": "Generating insights..."})
+    # Step 5: Insights
+    _emit("stage", {"stage": "generating", "message": "Generating insights..."})
     report_data = {
-        "n_reviews": len(reviews),
+        "n_reviews": total,
         "aspects": aspect_reports,
         "overall_summary": overall_summary,
     }
@@ -285,6 +293,6 @@ and what needs improvement. Be direct and specific."""
     except Exception:
         insights = []
     report_data["insights"] = insights
-    await _notify("insights", {"insights": insights})
+    _emit("insights", {"insights": insights})
 
-    return report_data
+    return report_data, corpus

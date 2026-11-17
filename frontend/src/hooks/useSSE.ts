@@ -152,7 +152,12 @@ export function useSSE() {
     }
   }
 
-  const startCSVReport = useCallback(async (file: File, domainId: string, aspects: string[]) => {
+  const startUploadReport = useCallback(async (
+    file: File,
+    domainId: string,
+    aspects: string[],
+    reviewColumn?: string,
+  ) => {
     if (abortRef.current) abortRef.current.abort();
     setState(initialState);
     setIsRunning(true);
@@ -165,8 +170,9 @@ export function useSSE() {
       formData.append('file', file);
       if (domainId) formData.append('domain_id', domainId);
       if (aspects.length > 0) formData.append('aspects', aspects.join(','));
+      if (reviewColumn?.trim()) formData.append('review_column', reviewColumn.trim());
 
-      const response = await fetch('/api/report/csv', {
+      const response = await fetch('/api/report/upload', {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -188,6 +194,8 @@ export function useSSE() {
     } finally {
       setIsRunning(false);
     }
+    // consumeSSE only touches stable state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cancel = useCallback(() => {
@@ -195,5 +203,5 @@ export function useSSE() {
     setIsRunning(false);
   }, []);
 
-  return { ...state, isRunning, startCSVReport, cancel, reset };
+  return { ...state, isRunning, startUploadReport, cancel, reset };
 }

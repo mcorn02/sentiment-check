@@ -1,7 +1,6 @@
 """
 Domain config CRUD endpoints.
 """
-import uuid
 from fastapi import APIRouter, HTTPException
 
 from api.db import get_domain, list_domains, insert_domain

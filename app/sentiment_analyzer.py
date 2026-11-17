@@ -93,7 +93,7 @@ Review:
 async def async_analyze_batch(
     reviews: list[str],
     aspects: list[str] = None,
-    domain: str = "movie",
+    domain: str = "product",
     max_concurrency: int = 10,
     on_progress: callable = None,
 ) -> list[list[dict]]:
